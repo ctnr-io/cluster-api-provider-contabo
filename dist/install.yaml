@@ -1,0 +1,1081 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+    control-plane: controller-manager
+  name: cluster-api-provider-contabo-system
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: contaboclusters.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    kind: ContaboCluster
+    listKind: ContaboClusterList
+    plural: contaboclusters
+    singular: contabocluster
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Cluster to which this ContaboCluster belongs
+      jsonPath: .metadata.labels.cluster\.x-k8s\.io/cluster-name
+      name: Cluster
+      type: string
+    - description: Cluster infrastructure is ready
+      jsonPath: .status.ready
+      name: Ready
+      type: string
+    - description: VPC ID
+      jsonPath: .status.network.vpcId
+      name: VPC
+      type: string
+    - description: API Endpoint
+      jsonPath: .spec.controlPlaneEndpoint.host
+      name: Endpoint
+      priority: 1
+      type: string
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: ContaboCluster is the Schema for the contaboclusters API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of ContaboCluster
+            properties:
+              controlPlaneEndpoint:
+                description: ControlPlaneEndpoint represents the endpoint used to
+                  communicate with the control plane.
+                properties:
+                  host:
+                    description: The hostname on which the API server is serving.
+                    type: string
+                  port:
+                    description: The port on which the API server is serving.
+                    format: int32
+                    type: integer
+                required:
+                - host
+                - port
+                type: object
+              network:
+                description: Network configuration for the cluster
+                properties:
+                  subnets:
+                    description: Subnet configuration
+                    items:
+                      description: ContaboSubnetSpec defines a subnet configuration
+                      properties:
+                        availabilityZone:
+                          description: Availability zone for the subnet
+                          type: string
+                        cidr:
+                          description: CIDR block for the subnet
+                          type: string
+                        name:
+                          description: Name of the subnet
+                          type: string
+                      required:
+                      - cidr
+                      - name
+                      type: object
+                    type: array
+                  vpcId:
+                    description: VPC ID for the cluster resources
+                    type: string
+                type: object
+              region:
+                description: Region is the Contabo region where the cluster will be
+                  deployed
+                type: string
+            required:
+            - region
+            type: object
+          status:
+            description: status defines the observed state of ContaboCluster
+            properties:
+              conditions:
+                description: Conditions defines current service state of the ContaboCluster.
+                items:
+                  description: Condition defines an observation of a Cluster API resource
+                    operational state.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        Last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed. If that is not known, then using the time when
+                        the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        A human readable message indicating details about the transition.
+                        This field may be empty.
+                      type: string
+                    reason:
+                      description: |-
+                        The reason for the condition's last transition in CamelCase.
+                        The specific API may choose whether or not this field is considered a guaranteed API.
+                        This field may not be empty.
+                      type: string
+                    severity:
+                      description: |-
+                        Severity provides an explicit classification of Reason code, so the users or machines can immediately
+                        understand the current situation and act accordingly.
+                        The Severity field MUST be set only when Status=False.
+                      type: string
+                    status:
+                      description: Status of the condition, one of True, False, Unknown.
+                      type: string
+                    type:
+                      description: |-
+                        Type of condition in CamelCase or in foo.example.com/CamelCase.
+                        Many .condition.type values are consistent across resources like Available, but because arbitrary conditions
+                        can be useful (see .node.status.conditions), the ability to deconflict is important.
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - status
+                  - type
+                  type: object
+                type: array
+              failureDomains:
+                additionalProperties:
+                  description: |-
+                    FailureDomainSpec is the Schema for Cluster API failure domains.
+                    It allows controllers to understand how many failure domains a cluster can optionally span across.
+                  properties:
+                    attributes:
+                      additionalProperties:
+                        type: string
+                      description: Attributes is a free form map of attributes an
+                        infrastructure provider might use or require.
+                      type: object
+                    controlPlane:
+                      description: ControlPlane determines if this failure domain
+                        is suitable for use by control plane machines.
+                      type: boolean
+                  type: object
+                description: FailureDomains is a list of failure domains that machines
+                  can be placed in.
+                type: object
+              network:
+                description: Network describes the cluster network configuration
+                properties:
+                  subnets:
+                    description: Subnets is a list of subnets
+                    items:
+                      description: ContaboSubnetStatus defines the status of a subnet
+                      properties:
+                        availabilityZone:
+                          description: AvailabilityZone of the subnet
+                          type: string
+                        cidr:
+                          description: CIDR block of the subnet
+                          type: string
+                        id:
+                          description: ID of the subnet
+                          type: string
+                        name:
+                          description: Name of the subnet
+                          type: string
+                      required:
+                      - cidr
+                      - id
+                      - name
+                      type: object
+                    type: array
+                  vpcId:
+                    description: VPCID is the ID of the VPC
+                    type: string
+                type: object
+              ready:
+                description: Ready denotes that the cluster (infrastructure) is ready.
+                type: boolean
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: contabomachines.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    kind: ContaboMachine
+    listKind: ContaboMachineList
+    plural: contabomachines
+    singular: contabomachine
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Cluster to which this ContaboMachine belongs
+      jsonPath: .metadata.labels.cluster\.x-k8s\.io/cluster-name
+      name: Cluster
+      type: string
+    - description: Contabo instance type
+      jsonPath: .spec.instanceType
+      name: InstanceType
+      type: string
+    - description: Contabo instance state
+      jsonPath: .status.instanceState
+      name: State
+      type: string
+    - description: Machine ready status
+      jsonPath: .status.ready
+      name: Ready
+      type: string
+    - description: Contabo instance ID
+      jsonPath: .spec.providerID
+      name: ProviderID
+      type: string
+    - description: Machine object which owns this ContaboMachine
+      jsonPath: .metadata.ownerReferences[?(@.kind=="Machine")].name
+      name: Machine
+      type: string
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: ContaboMachine is the Schema for the contabomachines API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of ContaboMachine
+            properties:
+              additionalMetadata:
+                additionalProperties:
+                  type: string
+                description: AdditionalMetadata is additional metadata to be added
+                  to the machine.
+                type: object
+              additionalTags:
+                additionalProperties:
+                  type: string
+                description: AdditionalTags is additional tags to be added to the
+                  machine.
+                type: object
+              image:
+                description: Image is the OS image to use for the machine.
+                type: string
+              instanceType:
+                description: InstanceType is the Contabo instance type for the machine.
+                type: string
+              network:
+                description: Network configuration for the machine
+                properties:
+                  privateIP:
+                    description: PrivateIP is the private IP address to assign to
+                      the machine
+                    type: string
+                  publicIP:
+                    description: PublicIP specifies whether to assign a public IP
+                      to the machine
+                    type: boolean
+                  subnetName:
+                    description: SubnetName is the name of the subnet to place the
+                      machine in
+                    type: string
+                type: object
+              providerID:
+                description: ProviderID is the unique identifier as specified by the
+                  cloud provider.
+                type: string
+              region:
+                description: Region is the Contabo region where the machine will be
+                  created.
+                type: string
+              sshKeys:
+                description: SSHKeys is a list of SSH key names to be added to the
+                  machine.
+                items:
+                  type: string
+                type: array
+              userData:
+                description: UserData is the cloud-init user data to use for the machine.
+                type: string
+            required:
+            - image
+            - instanceType
+            - region
+            type: object
+          status:
+            description: status defines the observed state of ContaboMachine
+            properties:
+              addresses:
+                description: Addresses contains the Contabo instance associated addresses.
+                items:
+                  description: MachineAddress contains information for the node's
+                    address.
+                  properties:
+                    address:
+                      description: The machine address.
+                      type: string
+                    type:
+                      description: Machine address type, one of Hostname, ExternalIP,
+                        InternalIP, ExternalDNS or InternalDNS.
+                      type: string
+                  required:
+                  - address
+                  - type
+                  type: object
+                type: array
+              conditions:
+                description: Conditions defines current service state of the ContaboMachine.
+                items:
+                  description: Condition defines an observation of a Cluster API resource
+                    operational state.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        Last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed. If that is not known, then using the time when
+                        the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        A human readable message indicating details about the transition.
+                        This field may be empty.
+                      type: string
+                    reason:
+                      description: |-
+                        The reason for the condition's last transition in CamelCase.
+                        The specific API may choose whether or not this field is considered a guaranteed API.
+                        This field may not be empty.
+                      type: string
+                    severity:
+                      description: |-
+                        Severity provides an explicit classification of Reason code, so the users or machines can immediately
+                        understand the current situation and act accordingly.
+                        The Severity field MUST be set only when Status=False.
+                      type: string
+                    status:
+                      description: Status of the condition, one of True, False, Unknown.
+                      type: string
+                    type:
+                      description: |-
+                        Type of condition in CamelCase or in foo.example.com/CamelCase.
+                        Many .condition.type values are consistent across resources like Available, but because arbitrary conditions
+                        can be useful (see .node.status.conditions), the ability to deconflict is important.
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - status
+                  - type
+                  type: object
+                type: array
+              failureMessage:
+                description: |-
+                  FailureMessage will be set in the event that there is a terminal problem
+                  reconciling the Machine and will contain a more verbose string suitable
+                  for logging and human consumption.
+
+                  This field should not be set for transitive errors that a controller
+                  faces that are expected to be fixed automatically over
+                  time (like service outages), but instead indicate that something is
+                  fundamentally wrong with the Machine's spec or the configuration of
+                  the controller, and that manual intervention is required. Examples
+                  of terminal errors would be invalid combinations of settings in the
+                  spec, values that are unsupported by the controller, or the
+                  responsible controller itself being critically misconfigured.
+
+                  Any transient errors that occur during the reconciliation of Machines
+                  can be added as events to the Machine object and/or logged in the
+                  controller's output.
+                type: string
+              failureReason:
+                description: |-
+                  FailureReason will be set in the event that there is a terminal problem
+                  reconciling the Machine and will contain a succinct value suitable
+                  for machine interpretation.
+
+                  This field should not be set for transitive errors that a controller
+                  faces that are expected to be fixed automatically over
+                  time (like service outages), but instead indicate that something is
+                  fundamentally wrong with the Machine's spec or the configuration of
+                  the controller, and that manual intervention is required. Examples
+                  of terminal errors would be invalid combinations of settings in the
+                  spec, values that are unsupported by the controller, or the
+                  responsible controller itself being critically misconfigured.
+
+                  Any transient errors that occur during the reconciliation of Machines
+                  can be added as events to the Machine object and/or logged in the
+                  controller's output.
+                type: string
+              instanceState:
+                description: InstanceState is the state of the Contabo instance.
+                type: string
+              network:
+                description: Network describes the machine network configuration
+                properties:
+                  privateIP:
+                    description: PrivateIP is the private IP address of the machine
+                    type: string
+                  publicIP:
+                    description: PublicIP is the public IP address of the machine
+                    type: string
+                  subnetID:
+                    description: SubnetID is the ID of the subnet the machine is in
+                    type: string
+                type: object
+              ready:
+                description: Ready is true when the provider resource is ready.
+                type: boolean
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: contabomachinetemplates.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: ContaboMachineTemplate
+    listKind: ContaboMachineTemplateList
+    plural: contabomachinetemplates
+    singular: contabomachinetemplate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Time duration since creation of ContaboMachineTemplate
+      jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: ContaboMachineTemplate is the Schema for the contabomachinetemplates
+          API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of ContaboMachineTemplate
+            properties:
+              template:
+                description: ContaboMachineTemplateResource describes the data needed
+                  to create a ContaboMachine from a template
+                properties:
+                  spec:
+                    description: ContaboMachineSpec defines the desired state of ContaboMachine
+                    properties:
+                      additionalMetadata:
+                        additionalProperties:
+                          type: string
+                        description: AdditionalMetadata is additional metadata to
+                          be added to the machine.
+                        type: object
+                      additionalTags:
+                        additionalProperties:
+                          type: string
+                        description: AdditionalTags is additional tags to be added
+                          to the machine.
+                        type: object
+                      image:
+                        description: Image is the OS image to use for the machine.
+                        type: string
+                      instanceType:
+                        description: InstanceType is the Contabo instance type for
+                          the machine.
+                        type: string
+                      network:
+                        description: Network configuration for the machine
+                        properties:
+                          privateIP:
+                            description: PrivateIP is the private IP address to assign
+                              to the machine
+                            type: string
+                          publicIP:
+                            description: PublicIP specifies whether to assign a public
+                              IP to the machine
+                            type: boolean
+                          subnetName:
+                            description: SubnetName is the name of the subnet to place
+                              the machine in
+                            type: string
+                        type: object
+                      providerID:
+                        description: ProviderID is the unique identifier as specified
+                          by the cloud provider.
+                        type: string
+                      region:
+                        description: Region is the Contabo region where the machine
+                          will be created.
+                        type: string
+                      sshKeys:
+                        description: SSHKeys is a list of SSH key names to be added
+                          to the machine.
+                        items:
+                          type: string
+                        type: array
+                      userData:
+                        description: UserData is the cloud-init user data to use for
+                          the machine.
+                        type: string
+                    required:
+                    - image
+                    - instanceType
+                    - region
+                    type: object
+                required:
+                - spec
+                type: object
+            required:
+            - template
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+  name: cluster-api-provider-contabo-controller-manager
+  namespace: cluster-api-provider-contabo-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+  name: cluster-api-provider-contabo-leader-election-role
+  namespace: cluster-api-provider-contabo-system
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+  name: cluster-api-provider-contabo-contabocluster-admin-role
+rules:
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contaboclusters
+  verbs:
+  - '*'
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contaboclusters/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+  name: cluster-api-provider-contabo-contabocluster-editor-role
+rules:
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contaboclusters
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contaboclusters/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+  name: cluster-api-provider-contabo-contabocluster-viewer-role
+rules:
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contaboclusters
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contaboclusters/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+  name: cluster-api-provider-contabo-contabomachine-admin-role
+rules:
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contabomachines
+  verbs:
+  - '*'
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contabomachines/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+  name: cluster-api-provider-contabo-contabomachine-editor-role
+rules:
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contabomachines
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contabomachines/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+  name: cluster-api-provider-contabo-contabomachine-viewer-role
+rules:
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contabomachines
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contabomachines/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+  name: cluster-api-provider-contabo-contabomachinetemplate-admin-role
+rules:
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contabomachinetemplates
+  verbs:
+  - '*'
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contabomachinetemplates/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+  name: cluster-api-provider-contabo-contabomachinetemplate-editor-role
+rules:
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contabomachinetemplates
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contabomachinetemplates/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+  name: cluster-api-provider-contabo-contabomachinetemplate-viewer-role
+rules:
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contabomachinetemplates
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contabomachinetemplates/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-api-provider-contabo-manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - clusters
+  - clusters/status
+  - machines
+  - machines/status
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contaboclusters
+  - contabomachines
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contaboclusters/finalizers
+  - contabomachines/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - contaboclusters/status
+  - contabomachines/status
+  verbs:
+  - get
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-api-provider-contabo-metrics-auth-role
+rules:
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-api-provider-contabo-metrics-reader
+rules:
+- nonResourceURLs:
+  - /metrics
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+  name: cluster-api-provider-contabo-leader-election-rolebinding
+  namespace: cluster-api-provider-contabo-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cluster-api-provider-contabo-leader-election-role
+subjects:
+- kind: ServiceAccount
+  name: cluster-api-provider-contabo-controller-manager
+  namespace: cluster-api-provider-contabo-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+  name: cluster-api-provider-contabo-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-api-provider-contabo-manager-role
+subjects:
+- kind: ServiceAccount
+  name: cluster-api-provider-contabo-controller-manager
+  namespace: cluster-api-provider-contabo-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cluster-api-provider-contabo-metrics-auth-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-api-provider-contabo-metrics-auth-role
+subjects:
+- kind: ServiceAccount
+  name: cluster-api-provider-contabo-controller-manager
+  namespace: cluster-api-provider-contabo-system
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+    control-plane: controller-manager
+  name: cluster-api-provider-contabo-controller-manager-metrics-service
+  namespace: cluster-api-provider-contabo-system
+spec:
+  ports:
+  - name: https
+    port: 8443
+    protocol: TCP
+    targetPort: 8443
+  selector:
+    app.kubernetes.io/name: cluster-api-provider-contabo
+    control-plane: controller-manager
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: cluster-api-provider-contabo
+    control-plane: controller-manager
+  name: cluster-api-provider-contabo-controller-manager
+  namespace: cluster-api-provider-contabo-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cluster-api-provider-contabo
+      control-plane: controller-manager
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        app.kubernetes.io/name: cluster-api-provider-contabo
+        control-plane: controller-manager
+    spec:
+      containers:
+      - args:
+        - --metrics-bind-address=:8443
+        - --leader-elect
+        - --health-probe-bind-address=:8081
+        command:
+        - /manager
+        image: controller:latest
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: manager
+        ports: []
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts: []
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: cluster-api-provider-contabo-controller-manager
+      terminationGracePeriodSeconds: 10
+      volumes: []

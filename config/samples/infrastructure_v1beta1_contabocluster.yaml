@@ -1,0 +1,21 @@
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: ContaboCluster
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-api-provider-contabo
+    app.kubernetes.io/managed-by: kustomize
+  name: contabocluster-sample
+spec:
+  region: "EU"
+  controlPlaneEndpoint:
+    host: "10.0.0.100"
+    port: 6443
+  network:
+    subnets:
+    - name: "default"
+      cidr: "10.0.0.0/16"
+  clusterTagging:
+    enabled: true
+    clusterTag: "cluster-api-cluster"
+    availableTag: "cluster-api-available"
+    tagColor: "#1E90FF"

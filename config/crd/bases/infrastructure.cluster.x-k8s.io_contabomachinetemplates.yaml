@@ -1,0 +1,151 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: contabomachinetemplates.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: ContaboMachineTemplate
+    listKind: ContaboMachineTemplateList
+    plural: contabomachinetemplates
+    singular: contabomachinetemplate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Time duration since creation of ContaboMachineTemplate
+      jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: ContaboMachineTemplate is the Schema for the contabomachinetemplates
+          API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of ContaboMachineTemplate
+            properties:
+              template:
+                description: ContaboMachineTemplateResource describes the data needed
+                  to create a ContaboMachine from a template
+                properties:
+                  spec:
+                    description: ContaboMachineSpec defines the desired state of ContaboMachine
+                    properties:
+                      additionalMetadata:
+                        additionalProperties:
+                          type: string
+                        description: AdditionalMetadata is additional metadata to
+                          be added to the machine.
+                        type: object
+                      additionalTags:
+                        additionalProperties:
+                          type: string
+                        description: AdditionalTags is additional tags to be added
+                          to the machine.
+                        type: object
+                      clusterTagging:
+                        description: ClusterTagging configures cluster membership
+                          tagging for cost management
+                        properties:
+                          availableTag:
+                            default: cluster-api-available
+                            description: AvailableTag is the tag name to use when
+                              marking instances as available
+                            type: string
+                          clusterTag:
+                            default: cluster-api-cluster
+                            description: ClusterTag is the tag name to use for cluster
+                              membership
+                            type: string
+                          enabled:
+                            default: true
+                            description: Enabled specifies whether cluster membership
+                              tagging is enabled
+                            type: boolean
+                          tagColor:
+                            default: '#1E90FF'
+                            description: TagColor is the color to use for cluster
+                              membership tags
+                            type: string
+                        type: object
+                      image:
+                        description: Image is the OS image to use for the machine.
+                        type: string
+                      instanceType:
+                        description: InstanceType is the Contabo instance type for
+                          the machine.
+                        type: string
+                      network:
+                        description: Network configuration for the machine
+                        properties:
+                          privateIP:
+                            description: PrivateIP is the private IP address to assign
+                              to the machine
+                            type: string
+                          publicIP:
+                            description: PublicIP specifies whether to assign a public
+                              IP to the machine
+                            type: boolean
+                          subnetName:
+                            description: SubnetName is the name of the subnet to place
+                              the machine in
+                            type: string
+                        type: object
+                      providerID:
+                        description: ProviderID is the unique identifier as specified
+                          by the cloud provider.
+                        type: string
+                      region:
+                        description: Region is the Contabo region where the machine
+                          will be created.
+                        type: string
+                      sshKeys:
+                        description: SSHKeys is a list of SSH key names to be added
+                          to the machine.
+                        items:
+                          type: string
+                        type: array
+                      userData:
+                        description: UserData is the cloud-init user data to use for
+                          the machine.
+                        type: string
+                    required:
+                    - image
+                    - instanceType
+                    - region
+                    type: object
+                required:
+                - spec
+                type: object
+            required:
+            - template
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}

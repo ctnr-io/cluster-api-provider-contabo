@@ -1,0 +1,22 @@
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: ContaboMachineTemplate
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-api-provider-contabo
+    app.kubernetes.io/managed-by: kustomize
+  name: contabomachinetemplate-sample
+spec:
+  template:
+    spec:
+      instanceType: "M"
+      image: "ubuntu-22.04"
+      region: "EU"
+      sshKeys:
+        - "my-ssh-key"
+      additionalMetadata:
+        purpose: "template-machine"
+      additionalTags:
+        environment: "development"
+      network:
+        subnetName: "default"
+        publicIP: true

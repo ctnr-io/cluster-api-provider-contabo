@@ -1,18 +1,77 @@
 # cluster-api-provider-contabo
-// TODO(user): Add simple overview of use/purpose
+
+A Kubernetes Cluster API provider for Contabo cloud infrastructure. This provider enables you to create and manage Kubernetes clusters on Contabo's VPS infrastructure using the Cluster API framework.
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+
+This Cluster API provider allows you to provision and manage Kubernetes clusters on Contabo's cloud infrastructure. It integrates with the Cluster API ecosystem to provide a consistent way to deploy workload clusters across different cloud providers.
+
+The provider includes:
+- **ContaboCluster**: Manages cluster-wide infrastructure (networking, load balancers)
+- **ContaboMachine**: Manages individual virtual machines (VPS instances)
+- **ContaboMachineTemplate**: Template for creating machines with consistent configuration
 
 ## Getting Started
 
 ### Prerequisites
 - go version v1.24.0+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+- docker version 17.03+
+- kubectl version v1.11.3+
+- Access to a Kubernetes v1.11.3+ cluster
+- Contabo API token (obtainable from the Contabo customer portal)
+
+### Quick Start
+
+1. **Install clusterctl**
+   ```sh
+   curl -L https://github.com/kubernetes-sigs/cluster-api/releases/latest/download/clusterctl-linux-amd64 -o clusterctl
+   chmod +x clusterctl
+   sudo mv clusterctl /usr/local/bin/clusterctl
+   ```
+
+2. **Set up environment variables**
+   ```sh
+   export CONTABO_API_TOKEN="your-contabo-api-token"
+   export CLUSTER_NAME="my-contabo-cluster"
+   export KUBERNETES_VERSION="v1.28.0"
+   export CONTROL_PLANE_MACHINE_COUNT=1
+   export WORKER_MACHINE_COUNT=2
+   ```
+
+3. **Initialize the management cluster**
+   ```sh
+   clusterctl init --infrastructure contabo
+   ```
+
+4. **Generate cluster configuration**
+   ```sh
+   clusterctl generate cluster $CLUSTER_NAME \
+     --infrastructure contabo \
+     --kubernetes-version $KUBERNETES_VERSION \
+     --control-plane-machine-count $CONTROL_PLANE_MACHINE_COUNT \
+     --worker-machine-count $WORKER_MACHINE_COUNT \
+     > $CLUSTER_NAME.yaml
+   ```
+
+5. **Create the cluster**
+   ```sh
+   kubectl apply -f $CLUSTER_NAME.yaml
+   ```
+
+6. **Get the kubeconfig for the new cluster**
+   ```sh
+   clusterctl get kubeconfig $CLUSTER_NAME > $CLUSTER_NAME.kubeconfig
+   ```
+
+### Development Setup
 
 ### To Deploy on the cluster
+
+**Set up your Contabo API token:**
+```sh
+export CONTABO_API_TOKEN="your-contabo-api-token"
+```
+
 **Build and push your image to the location specified by `IMG`:**
 
 ```sh
@@ -45,7 +104,12 @@ You can apply the samples (examples) from the config/sample:
 kubectl apply -k config/samples/
 ```
 
->**NOTE**: Ensure that the samples has default values to test it out.
+**Important:** Before applying the samples, make sure to:
+1. Set the `CONTABO_API_TOKEN` environment variable in the manager deployment
+2. Update the sample configurations with your actual Contabo region and SSH keys
+3. Ensure you have valid Contabo instance types and image IDs
+
+>**NOTE**: Ensure that the samples have valid values for your Contabo account.
 
 ### To Uninstall
 **Delete the instances (CRs) from the cluster:**
@@ -66,7 +130,54 @@ make uninstall
 make undeploy
 ```
 
+## Configuration
+
+### API Types
+
+#### ContaboCluster
+Manages cluster-wide infrastructure including networking and control plane endpoint.
+
+**Key fields:**
+- `region`: Contabo region (e.g., "EU", "US-central", "US-east", "US-west", "SIN")
+- `controlPlaneEndpoint`: Kubernetes API server endpoint
+- `network`: Network configuration including subnets
+
+#### ContaboMachine
+Manages individual VPS instances.
+
+**Key fields:**
+- `instanceType`: Contabo VPS plan (e.g., "S", "M", "L", "XL", "XXL")
+- `image`: OS image ID (e.g., "ubuntu-22.04", "ubuntu-20.04", "centos-8")
+- `region`: Contabo region where the instance will be created
+- `sshKeys`: List of SSH key names/IDs
+- `userData`: Cloud-init user data (base64 encoded)
+
+#### ContaboMachineTemplate
+Template for creating machines with consistent configuration.
+
+### Environment Variables
+
+- `CONTABO_API_TOKEN`: Your Contabo API token (required)
+
+### Available Regions
+- `EU`: European data centers
+- `US-central`: US Central data centers
+- `US-east`: US East data centers
+- `US-west`: US West data centers
+- `SIN`: Singapore data centers
+
+### Available Instance Types
+- `S`: Small VPS
+- `M`: Medium VPS  
+- `L`: Large VPS
+- `XL`: Extra Large VPS
+- `XXL`: Extra Extra Large VPS
+
+See the Contabo documentation for current specifications and pricing.
+
 ## Project Distribution
+
+### Creating a Release
 
 Following the options to release and provide this solution to the users.
 
@@ -111,7 +222,62 @@ previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml
 is manually re-applied afterwards.
 
 ## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
+
+We welcome contributions to the Cluster API Contabo Provider! Here's how you can contribute:
+
+### Development Workflow
+
+1. **Fork the repository** and clone your fork
+2. **Create a feature branch** from main
+3. **Make your changes** and add tests
+4. **Run tests** and ensure they pass:
+   ```sh
+   make test
+   ```
+5. **Build and test locally**:
+   ```sh
+   make build
+   make docker-build
+   ```
+6. **Submit a pull request** with a clear description of your changes
+
+### Code Guidelines
+
+- Follow Go best practices and conventions
+- Add unit tests for new functionality
+- Update documentation for any API changes
+- Ensure all CI checks pass
+
+### Testing
+
+Run the full test suite:
+```sh
+make test
+```
+
+Run end-to-end tests (requires a management cluster):
+```sh
+make test-e2e
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**Authentication errors:**
+- Verify your `CONTABO_API_TOKEN` is correct and has sufficient permissions
+- Check that the token is properly set in the environment
+
+**Instance creation failures:**
+- Verify the instance type is available in your selected region
+- Check that the image ID is valid and available
+- Ensure your Contabo account has sufficient quota
+
+**Network connectivity issues:**
+- Verify security groups and firewall rules allow necessary traffic
+- Check that the control plane endpoint is accessible
+
+For more help, please open an issue in the GitHub repository.
 
 **NOTE:** Run `make help` for more information on all potential `make` targets
 
