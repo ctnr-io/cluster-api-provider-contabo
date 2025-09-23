@@ -89,29 +89,29 @@ func IsManagedByCAPC(displayName string) bool {
 
 // Instance represents a Contabo VPS instance
 type Instance struct {
-	TenantID      string            `json:"tenantId"`
-	CustomerID    string            `json:"customerId"`
-	InstanceID    int64             `json:"instanceId"`
-	Name          string            `json:"name"`
-	DisplayName   string            `json:"displayName"`
-	Status        string            `json:"status"`
-	Region        string            `json:"region"`
-	RegionName    string            `json:"regionName"`
-	DataCenter    string            `json:"dataCenter"`
-	ProductID     string            `json:"productId"`
-	ImageID       string            `json:"imageId"`
-	IPConfig      InstanceIPConfig  `json:"ipConfig"`
-	MacAddress    string            `json:"macAddress"`
-	RAMMb         float64           `json:"ramMb"`
-	CPUCores      int               `json:"cpuCores"`
-	OSType        string            `json:"osType"`
-	DiskMb        float64           `json:"diskMb"`
-	SSHKeys       []int64           `json:"sshKeys"`
-	CreatedDate   time.Time         `json:"createdDate"`
-	CancelDate    *time.Time        `json:"cancelDate,omitempty"`
-	Image         InstanceImage     `json:"image"`
-	Product       InstanceProduct   `json:"product"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
+	TenantID    string            `json:"tenantId"`
+	CustomerID  string            `json:"customerId"`
+	InstanceID  int64             `json:"instanceId"`
+	Name        string            `json:"name"`
+	DisplayName string            `json:"displayName"`
+	Status      string            `json:"status"`
+	Region      string            `json:"region"`
+	RegionName  string            `json:"regionName"`
+	DataCenter  string            `json:"dataCenter"`
+	ProductID   string            `json:"productId"`
+	ImageID     string            `json:"imageId"`
+	IPConfig    InstanceIPConfig  `json:"ipConfig"`
+	MacAddress  string            `json:"macAddress"`
+	RAMMb       float64           `json:"ramMb"`
+	CPUCores    int               `json:"cpuCores"`
+	OSType      string            `json:"osType"`
+	DiskMb      float64           `json:"diskMb"`
+	SSHKeys     []int64           `json:"sshKeys"`
+	CreatedDate time.Time         `json:"createdDate"`
+	CancelDate  *time.Time        `json:"cancelDate,omitempty"`
+	Image       InstanceImage     `json:"image"`
+	Product     InstanceProduct   `json:"product"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 // InstanceIPConfig represents the IP configuration of an instance
@@ -197,6 +197,27 @@ type ListInstancesResponse struct {
 	} `json:"_pagination"`
 }
 
+// ListInstancesOptions contains options for listing instances based on Contabo OpenAPI spec
+type ListInstancesOptions struct {
+	// Pagination
+	Page    *int     `json:"page,omitempty"`    // Number of page to be fetched
+	Size    *int     `json:"size,omitempty"`    // Number of elements per page
+	OrderBy []string `json:"orderBy,omitempty"` // Specify fields and ordering (field:ASC|DESC)
+
+	// Filters
+	Name         string `json:"name,omitempty"`         // The name of the instance
+	DisplayName  string `json:"displayName,omitempty"`  // The display name of the instance
+	DataCenter   string `json:"dataCenter,omitempty"`   // The data center of the instance
+	Region       string `json:"region,omitempty"`       // The Region of the instance
+	InstanceIds  string `json:"instanceIds,omitempty"`  // Comma separated instances identifiers
+	Status       string `json:"status,omitempty"`       // The status of the instance
+	ProductIds   string `json:"productIds,omitempty"`   // Identifiers of the instance products
+	AddOnIds     string `json:"addOnIds,omitempty"`     // Identifiers of Addons the instances have
+	ProductTypes string `json:"productTypes,omitempty"` // Comma separated instance's category
+	IpConfig     *bool  `json:"ipConfig,omitempty"`     // Filter instances that have an ip config
+	Search       string `json:"search,omitempty"`       // Full text search by name, displayName, ipAddress
+}
+
 // InstancesService handles instance-related API operations
 type InstancesService struct {
 	client *Client
@@ -207,14 +228,69 @@ func NewInstancesService(client *Client) *InstancesService {
 	return &InstancesService{client: client}
 }
 
-// List retrieves a list of instances (first page only, for backward compatibility)
-func (s *InstancesService) List(ctx context.Context) ([]Instance, error) {
-	return s.ListWithPagination(ctx, 1, 25) // Default page 1, size 25
-}
+// List retrieves instances based on the provided options
+// Uses the exact query parameters supported by the Contabo OpenAPI spec
+func (s *InstancesService) List(ctx context.Context, opts *ListInstancesOptions) ([]Instance, error) {
+	path := "/v1/compute/instances"
 
-// ListWithPagination retrieves a specific page of instances
-func (s *InstancesService) ListWithPagination(ctx context.Context, page, size int) ([]Instance, error) {
-	path := fmt.Sprintf("/v1/compute/instances?page=%d&size=%d", page, size)
+	// Build query parameters based on OpenAPI spec
+	queryParams := make([]string, 0)
+
+	if opts != nil {
+		// Pagination parameters
+		if opts.Page != nil {
+			queryParams = append(queryParams, fmt.Sprintf("page=%d", *opts.Page))
+		}
+		if opts.Size != nil {
+			queryParams = append(queryParams, fmt.Sprintf("size=%d", *opts.Size))
+		}
+
+		// OrderBy parameter (array of strings)
+		for _, order := range opts.OrderBy {
+			queryParams = append(queryParams, fmt.Sprintf("orderBy=%s", order))
+		}
+
+		// Filter parameters
+		if opts.Name != "" {
+			queryParams = append(queryParams, fmt.Sprintf("name=%s", opts.Name))
+		}
+		if opts.DisplayName != "" {
+			queryParams = append(queryParams, fmt.Sprintf("displayName=%s", opts.DisplayName))
+		}
+		if opts.DataCenter != "" {
+			queryParams = append(queryParams, fmt.Sprintf("dataCenter=%s", opts.DataCenter))
+		}
+		if opts.Region != "" {
+			queryParams = append(queryParams, fmt.Sprintf("region=%s", opts.Region))
+		}
+		if opts.InstanceIds != "" {
+			queryParams = append(queryParams, fmt.Sprintf("instanceIds=%s", opts.InstanceIds))
+		}
+		if opts.Status != "" {
+			queryParams = append(queryParams, fmt.Sprintf("status=%s", opts.Status))
+		}
+		if opts.ProductIds != "" {
+			queryParams = append(queryParams, fmt.Sprintf("productIds=%s", opts.ProductIds))
+		}
+		if opts.AddOnIds != "" {
+			queryParams = append(queryParams, fmt.Sprintf("addOnIds=%s", opts.AddOnIds))
+		}
+		if opts.ProductTypes != "" {
+			queryParams = append(queryParams, fmt.Sprintf("productTypes=%s", opts.ProductTypes))
+		}
+		if opts.IpConfig != nil {
+			queryParams = append(queryParams, fmt.Sprintf("ipConfig=%t", *opts.IpConfig))
+		}
+		if opts.Search != "" {
+			queryParams = append(queryParams, fmt.Sprintf("search=%s", opts.Search))
+		}
+	}
+
+	// Add query parameters to path
+	if len(queryParams) > 0 {
+		path += "?" + strings.Join(queryParams, "&")
+	}
+
 	resp, err := s.client.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list instances: %w", err)
@@ -228,61 +304,53 @@ func (s *InstancesService) ListWithPagination(ctx context.Context, page, size in
 	return listResp.Data, nil
 }
 
-// ListAllInstances retrieves all instances by paginating through all pages
-func (s *InstancesService) ListAllInstances(ctx context.Context) ([]Instance, error) {
+// ListAll retrieves all instances by automatically paginating through all pages
+// This is a convenience method for when you need all instances without manual pagination
+func (s *InstancesService) ListAll(ctx context.Context, filters *ListInstancesOptions) ([]Instance, error) {
 	var allInstances []Instance
 	page := 1
-	size := 100 // Use larger page size for efficiency
+	size := 100      // Use larger page size for efficiency
+	maxPages := 1000 // Safety limit to prevent infinite loops
 
 	for {
-		path := fmt.Sprintf("/v1/compute/instances?page=%d&size=%d", page, size)
-		resp, err := s.client.doRequest(ctx, http.MethodGet, path, nil)
+		// Create options for this page
+		opts := &ListInstancesOptions{
+			Page: &page,
+			Size: &size,
+		}
+
+		// Copy filters if provided
+		if filters != nil {
+			opts.Name = filters.Name
+			opts.DisplayName = filters.DisplayName
+			opts.DataCenter = filters.DataCenter
+			opts.Region = filters.Region
+			opts.InstanceIds = filters.InstanceIds
+			opts.Status = filters.Status
+			opts.ProductIds = filters.ProductIds
+			opts.AddOnIds = filters.AddOnIds
+			opts.ProductTypes = filters.ProductTypes
+			opts.IpConfig = filters.IpConfig
+			opts.Search = filters.Search
+			opts.OrderBy = filters.OrderBy
+		}
+
+		// Get this page
+		instances, err := s.List(ctx, opts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list instances page %d: %w", page, err)
 		}
 
-		var listResp ListInstancesResponse
-		if err := parseResponse(resp, &listResp); err != nil {
-			return nil, fmt.Errorf("failed to parse list instances response for page %d: %w", page, err)
-		}
+		allInstances = append(allInstances, instances...)
 
-		allInstances = append(allInstances, listResp.Data...)
-
-		// Check if we've reached the last page or no more data
-		if len(listResp.Data) == 0 || page >= listResp.Pagination.TotalPages {
+		// Check if we've reached the last page (no more data)
+		if len(instances) == 0 || len(instances) < size {
 			break
 		}
 
-		page++
-	}
-
-	return allInstances, nil
-}
-
-// ListInstancesByRegion retrieves all instances in a specific region by paginating through all pages
-func (s *InstancesService) ListInstancesByRegion(ctx context.Context, region string) ([]Instance, error) {
-	var allInstances []Instance
-	page := 1
-	size := 100 // Use larger page size for efficiency
-
-	for {
-		// Use region filter to reduce data transfer
-		path := fmt.Sprintf("/v1/compute/instances?page=%d&size=%d&region=%s", page, size, region)
-		resp, err := s.client.doRequest(ctx, http.MethodGet, path, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list instances page %d for region %s: %w", page, region, err)
-		}
-
-		var listResp ListInstancesResponse
-		if err := parseResponse(resp, &listResp); err != nil {
-			return nil, fmt.Errorf("failed to parse list instances response for page %d: %w", page, err)
-		}
-
-		allInstances = append(allInstances, listResp.Data...)
-
-		// Check if we've reached the last page or no more data
-		if len(listResp.Data) == 0 || page >= listResp.Pagination.TotalPages {
-			break
+		// Safety check to prevent infinite loops
+		if page >= maxPages {
+			return nil, fmt.Errorf("reached maximum page limit (%d) while fetching instances", maxPages)
 		}
 
 		page++
@@ -418,7 +486,7 @@ func ParseProviderID(providerID string) (int64, error) {
 // UpdateDisplayName updates the displayName of an instance using the PATCH endpoint
 func (s *InstancesService) UpdateDisplayName(ctx context.Context, instanceID int64, displayName string) error {
 	path := fmt.Sprintf("/v1/compute/instances/%d", instanceID)
-	
+
 	req := &PatchInstanceRequest{
 		DisplayName: displayName,
 	}
@@ -432,9 +500,14 @@ func (s *InstancesService) UpdateDisplayName(ctx context.Context, instanceID int
 }
 
 // SetInstanceState updates an instance's displayName to reflect its state
-func (s *InstancesService) SetInstanceState(ctx context.Context, instanceID int64, state InstanceState, clusterName string) error {
+func (s *InstancesService) SetInstanceState(
+	ctx context.Context,
+	instanceID int64,
+	state InstanceState,
+	clusterName string,
+) error {
 	var displayName string
-	
+
 	switch state {
 	case StateAvailable:
 		displayName = AvailableState
@@ -448,7 +521,7 @@ func (s *InstancesService) SetInstanceState(ctx context.Context, instanceID int6
 	default:
 		return fmt.Errorf("invalid state: %v", state)
 	}
-	
+
 	return s.UpdateDisplayName(ctx, instanceID, displayName)
 }
 

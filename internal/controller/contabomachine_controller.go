@@ -237,13 +237,13 @@ func (r *ContaboMachineReconciler) reconcileInstance(ctx context.Context, machin
 	}
 
 	// Try to find an available instance for reuse first
-	availableInstance, err := r.findAvailableInstance(ctx, contaboMachine, contaboCluster)
+	availableInstance, err := r.findAvailableInstance(ctx, contaboMachine)
 	if err != nil {
 		log.Error(err, "failed to search for available instances")
 		// Continue to create new instance
 	} else if availableInstance != nil {
 		log.Info("Found available instance for reuse", "instanceId", availableInstance.InstanceID)
-		
+
 		// Reinstall the instance with the correct image and user data
 		if err := r.reinstallInstance(ctx, availableInstance.InstanceID, contaboMachine, userData); err != nil {
 			log.Error(err, "failed to reinstall available instance, will create new one")
@@ -252,13 +252,13 @@ func (r *ContaboMachineReconciler) reconcileInstance(ctx context.Context, machin
 			// Set the provider ID to the reused instance
 			providerID := cloud.BuildProviderID(availableInstance.InstanceID)
 			contaboMachine.Spec.ProviderID = &providerID
-			
+
 			// Wait for reinstallation and cloud-init to complete
 			instance, err := r.waitForInstanceReady(ctx, availableInstance.InstanceID, "reinstalling and configuring")
 			if err != nil {
 				return nil, fmt.Errorf("failed to wait for reinstalled instance: %w", err)
 			}
-			
+
 			log.Info("Successfully reused and reinstalled instance", "instanceId", availableInstance.InstanceID)
 			return instance, nil
 		}
@@ -304,13 +304,16 @@ func (r *ContaboMachineReconciler) reconcileInstance(ctx context.Context, machin
 }
 
 // findAvailableInstance searches for an available instance that can be reused
-func (r *ContaboMachineReconciler) findAvailableInstance(ctx context.Context, contaboMachine *infrastructurev1beta1.ContaboMachine, contaboCluster *infrastructurev1beta1.ContaboCluster) (*cloud.Instance, error) {
+func (r *ContaboMachineReconciler) findAvailableInstance(ctx context.Context, contaboMachine *infrastructurev1beta1.ContaboMachine) (*cloud.Instance, error) {
 	log := logf.FromContext(ctx)
 
 	log.Info("Searching for available instances in region", "region", contaboMachine.Spec.Region, "productType", contaboMachine.Spec.InstanceType)
 
-	// Get all instances in the target region by paginating through all pages
-	instances, err := r.ContaboService.Instances.ListInstancesByRegion(ctx, contaboMachine.Spec.Region)
+	// Get all instances in the target region using the OpenAPI parameters
+	instances, err := r.ContaboService.Instances.ListAll(ctx, &cloud.ListInstancesOptions{
+		Region: contaboMachine.Spec.Region,
+		Search: "capc-available", // Instances marked available for reuse
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list instances in region %s: %w", contaboMachine.Spec.Region, err)
 	}
@@ -335,9 +338,9 @@ func (r *ContaboMachineReconciler) findAvailableInstance(ctx context.Context, co
 	if len(candidateInstances) > 0 {
 		// Return the first available instance
 		instance := candidateInstances[0]
-		log.Info("Found available instance for reuse", 
-			"instanceId", instance.InstanceID, 
-			"region", instance.Region, 
+		log.Info("Found available instance for reuse",
+			"instanceId", instance.InstanceID,
+			"region", instance.Region,
 			"productId", instance.Product.ProductID,
 			"candidatesFound", len(candidateInstances))
 		return &instance, nil
@@ -390,7 +393,7 @@ func (r *ContaboMachineReconciler) waitForInstanceReady(ctx context.Context, ins
 		}
 
 		log.Info("Waiting for instance to be ready", "instanceId", instanceID, "status", instance.Status, "operation", operation)
-		
+
 		// Sleep before checking again
 		select {
 		case <-ctx.Done():
@@ -403,14 +406,13 @@ func (r *ContaboMachineReconciler) waitForInstanceReady(ctx context.Context, ins
 	return nil, fmt.Errorf("timeout waiting for instance %d to be ready after %s", instanceID, operation)
 }
 
-
 // ensureInstanceClusterBinding binds an instance to a cluster via displayName
 func (r *ContaboMachineReconciler) ensureInstanceClusterBinding(ctx context.Context, instance *cloud.Instance, clusterName string) error {
 	log := logf.FromContext(ctx)
 
 	// Set the instance displayName to bind it to the cluster
 	log.Info("Binding instance to cluster", "instanceId", instance.InstanceID, "clusterName", clusterName)
-	
+
 	return r.ContaboService.Instances.SetInstanceState(ctx, instance.InstanceID, cloud.StateClusterBound, clusterName)
 }
 
@@ -420,7 +422,7 @@ func (r *ContaboMachineReconciler) removeClusterBinding(ctx context.Context, ins
 	log := logf.FromContext(ctx)
 
 	log.Info("Setting instance state to available for reuse", "instanceId", instanceID)
-	
+
 	return r.ContaboService.Instances.SetInstanceState(ctx, instanceID, cloud.StateAvailable, "")
 }
 

@@ -25,20 +25,20 @@ import (
 
 // Image represents a Contabo OS image
 type Image struct {
-	ImageID          string  `json:"imageId"`
-	TenantID         string  `json:"tenantId"`
-	CustomerID       string  `json:"customerId"`
-	Name             string  `json:"name"`
-	Description      string  `json:"description"`
-	URL              string  `json:"url"`
-	SizeMb           float64 `json:"sizeMb"`
-	UploadedSizeMb   float64 `json:"uploadedSizeMb"`
-	OSType           string  `json:"osType"`
-	Version          string  `json:"version"`
-	Format           string  `json:"format"`
-	Status           string  `json:"status"`
-	ErrorMessage     string  `json:"errorMessage"`
-	StandardImage    bool    `json:"standardImage"`
+	ImageID        string  `json:"imageId"`
+	TenantID       string  `json:"tenantId"`
+	CustomerID     string  `json:"customerId"`
+	Name           string  `json:"name"`
+	Description    string  `json:"description"`
+	URL            string  `json:"url"`
+	SizeMb         float64 `json:"sizeMb"`
+	UploadedSizeMb float64 `json:"uploadedSizeMb"`
+	OSType         string  `json:"osType"`
+	Version        string  `json:"version"`
+	Format         string  `json:"format"`
+	Status         string  `json:"status"`
+	ErrorMessage   string  `json:"errorMessage"`
+	StandardImage  bool    `json:"standardImage"`
 }
 
 // ListImagesResponse represents the response from listing images
