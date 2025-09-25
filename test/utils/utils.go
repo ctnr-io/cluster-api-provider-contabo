@@ -31,6 +31,10 @@ const (
 	certmanagerVersion = "v1.18.2"
 	certmanagerURLTmpl = "https://github.com/cert-manager/cert-manager/releases/download/%s/cert-manager.yaml"
 
+	capiOperatorHelmRepo = "https://kubernetes-sigs.github.io/cluster-api-operator"
+	capiOperatorVersion  = "v0.14.0"
+	clusterAPIVersion    = "v1.8.5"
+
 	defaultKindBinary  = "kind"
 	defaultKindCluster = "kind"
 )
@@ -223,4 +227,99 @@ func UncommentCode(filename, target, prefix string) error {
 	}
 
 	return nil
+}
+
+// InstallCAPIOperator installs the Cluster API operator using Helm.
+func InstallCAPIOperator() error {
+	// Add the CAPI operator Helm repository
+	cmd := exec.Command("helm", "repo", "add", "capi-operator", capiOperatorHelmRepo)
+	if _, err := Run(cmd); err != nil {
+		return fmt.Errorf("failed to add CAPI operator Helm repo: %w", err)
+	}
+
+	// Update Helm repositories
+	cmd = exec.Command("helm", "repo", "update")
+	if _, err := Run(cmd); err != nil {
+		return fmt.Errorf("failed to update Helm repos: %w", err)
+	}
+
+	// Install CAPI operator via Helm
+	cmd = exec.Command("helm", "install", "capi-operator", "capi-operator/cluster-api-operator",
+		"--namespace", "capi-operator-system",
+		"--create-namespace",
+		"--version", capiOperatorVersion,
+		"--wait", "--timeout=5m")
+	if _, err := Run(cmd); err != nil {
+		return fmt.Errorf("failed to install CAPI operator via Helm: %w", err)
+	}
+
+	return nil
+}
+
+// InstallClusterAPICRDs installs the Cluster API core components using the CAPI operator.
+func InstallClusterAPICRDs() error {
+	// Create CoreProvider to install core Cluster API components
+	coreProviderYAML := fmt.Sprintf(`
+apiVersion: operator.cluster.x-k8s.io/v1alpha2
+kind: CoreProvider
+metadata:
+  name: cluster-api
+  namespace: capi-operator-system
+spec:
+  version: %s
+`, clusterAPIVersion)
+
+	// Apply the CoreProvider
+	tempFile, err := os.CreateTemp("", "core-provider-*.yaml")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file for CoreProvider: %w", err)
+	}
+	defer func() {
+		tempFile.Close()
+		os.Remove(tempFile.Name())
+	}()
+
+	if _, err := tempFile.WriteString(coreProviderYAML); err != nil {
+		return fmt.Errorf("failed to write CoreProvider YAML: %w", err)
+	}
+	tempFile.Close()
+
+	cmd := exec.Command("kubectl", "apply", "-f", tempFile.Name())
+	if _, err := Run(cmd); err != nil {
+		return fmt.Errorf("failed to create CoreProvider: %w", err)
+	}
+
+	// Wait for core provider to be installed
+	cmd = exec.Command("kubectl", "wait", "coreprovider/cluster-api",
+		"--for", "condition=Ready",
+		"--namespace", "capi-operator-system",
+		"--timeout", "5m",
+	)
+	if _, err := Run(cmd); err != nil {
+		return fmt.Errorf("failed to wait for CoreProvider to be ready: %w", err)
+	}
+
+	return nil
+}
+
+// UninstallCAPIOperator uninstalls the CAPI operator and related components.
+func UninstallCAPIOperator() {
+	// Delete CoreProvider first
+	cmd := exec.Command("kubectl", "delete", "coreprovider", "cluster-api",
+		"-n", "capi-operator-system", "--ignore-not-found")
+	if _, err := Run(cmd); err != nil {
+		warnError(err)
+	}
+
+	// Uninstall CAPI operator via Helm
+	cmd = exec.Command("helm", "uninstall", "capi-operator", "-n", "capi-operator-system")
+	if _, err := Run(cmd); err != nil {
+		warnError(err)
+	}
+
+	// Remove Helm repo
+	cmd = exec.Command("helm", "repo", "remove", "capi-operator")
+	if _, err := Run(cmd); err != nil {
+		warnError(err)
+	}
 }
