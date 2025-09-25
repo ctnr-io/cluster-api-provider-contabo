@@ -18,7 +18,10 @@ The provider includes:
 - docker version 17.03+
 - kubectl version v1.11.3+
 - Access to a Kubernetes v1.11.3+ cluster
-- Contabo API token (obtainable from the Contabo customer portal)
+- Contabo API credentials:
+  - Client ID and Client Secret (OAuth2 application credentials)
+  - API User and API Password (Contabo account credentials)
+  All obtainable from the Contabo customer portal
 
 ### Quick Start
 
@@ -31,7 +34,10 @@ The provider includes:
 
 2. **Set up environment variables**
    ```sh
-   export CONTABO_API_TOKEN="your-contabo-api-token"
+   export CONTABO_CLIENT_ID="your-oauth2-client-id"
+   export CONTABO_CLIENT_SECRET="your-oauth2-client-secret"
+   export CONTABO_API_USER="your-contabo-username"
+   export CONTABO_API_PASSWORD="your-contabo-password"
    export CLUSTER_NAME="my-contabo-cluster"
    export KUBERNETES_VERSION="v1.28.0"
    export CONTROL_PLANE_MACHINE_COUNT=1
@@ -67,9 +73,12 @@ The provider includes:
 
 ### To Deploy on the cluster
 
-**Set up your Contabo API token:**
+**Set up your Contabo OAuth2 credentials:**
 ```sh
-export CONTABO_API_TOKEN="your-contabo-api-token"
+export CONTABO_CLIENT_ID="your-oauth2-client-id"
+export CONTABO_CLIENT_SECRET="your-oauth2-client-secret"
+export CONTABO_API_USER="your-contabo-username"
+export CONTABO_API_PASSWORD="your-contabo-password"
 ```
 
 **Build and push your image to the location specified by `IMG`:**
@@ -105,7 +114,11 @@ kubectl apply -k config/samples/
 ```
 
 **Important:** Before applying the samples, make sure to:
-1. Set the `CONTABO_API_TOKEN` environment variable in the manager deployment
+1. Set the Contabo OAuth2 credentials environment variables in the manager deployment:
+   - `CONTABO_CLIENT_ID`
+   - `CONTABO_CLIENT_SECRET` 
+   - `CONTABO_API_USER`
+   - `CONTABO_API_PASSWORD`
 2. Update the sample configurations with your actual Contabo region and SSH keys
 3. Ensure you have valid Contabo instance types and image IDs
 
@@ -157,7 +170,28 @@ Template for creating machines with consistent configuration.
 
 ### Environment Variables
 
-- `CONTABO_API_TOKEN`: Your Contabo API token (required)
+- `CONTABO_CLIENT_ID`: OAuth2 Client ID from Contabo (required)
+- `CONTABO_CLIENT_SECRET`: OAuth2 Client Secret from Contabo (required)
+- `CONTABO_API_USER`: Contabo account username (required)
+- `CONTABO_API_PASSWORD`: Contabo account password (required)
+
+### Authentication Setup
+
+The Contabo provider uses OAuth2 authentication with client credentials flow. To set up authentication:
+
+1. **Log in to the Contabo Customer Portal**
+2. **Create OAuth2 Application:**
+   - Navigate to API settings
+   - Create a new OAuth2 application
+   - Note down the Client ID and Client Secret
+3. **Use your account credentials:**
+   - Username: Your Contabo account username
+   - Password: Your Contabo account password
+
+The authentication flow automatically obtains access tokens from:
+```
+https://auth.contabo.com/auth/realms/contabo/protocol/openid-connect/token
+```
 
 ### Available Regions
 - `EU`: European data centers
@@ -265,8 +299,11 @@ make test-e2e
 ### Common Issues
 
 **Authentication errors:**
-- Verify your `CONTABO_API_TOKEN` is correct and has sufficient permissions
-- Check that the token is properly set in the environment
+- Verify your OAuth2 credentials are correct:
+  - `CONTABO_CLIENT_ID` and `CONTABO_CLIENT_SECRET` from OAuth2 application
+  - `CONTABO_API_USER` and `CONTABO_API_PASSWORD` from your Contabo account
+- Check that all credentials are properly set in the environment
+- Ensure your OAuth2 application has sufficient API permissions
 
 **Instance creation failures:**
 - Verify the instance type is available in your selected region

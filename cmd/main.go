@@ -41,6 +41,7 @@ import (
 
 	infrastructurev1beta1 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta1"
 	"github.com/ctnr-io/cluster-api-provider-contabo/internal/controller"
+	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/auth"
 	contaboclient "github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/client"
 	// +kubebuilder:scaffold:imports
 )
@@ -58,6 +59,8 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
+
+
 // nolint:gocyclo
 func main() {
 	var metricsAddr string
@@ -67,7 +70,10 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
-	var contaboAPIToken string
+	var contaboClientID string
+	var contaboClientSecret string
+	var contaboAPIUser string
+	var contaboAPIPassword string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -86,8 +92,14 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	flag.StringVar(&contaboAPIToken, "contabo-api-token", "",
-		"The Contabo API token for authentication. Can also be set via CONTABO_API_TOKEN environment variable.")
+	flag.StringVar(&contaboClientID, "contabo-client-id", "",
+		"The Contabo OAuth2 client ID. Can also be set via CONTABO_CLIENT_ID environment variable.")
+	flag.StringVar(&contaboClientSecret, "contabo-client-secret", "",
+		"The Contabo OAuth2 client secret. Can also be set via CONTABO_CLIENT_SECRET environment variable.")
+	flag.StringVar(&contaboAPIUser, "contabo-api-user", "",
+		"The Contabo API username. Can also be set via CONTABO_API_USER environment variable.")
+	flag.StringVar(&contaboAPIPassword, "contabo-api-password", "",
+		"The Contabo API password. Can also be set via CONTABO_API_PASSWORD environment variable.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -96,21 +108,46 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// Get Contabo API token from environment if not provided via flag
-	if contaboAPIToken == "" {
-		contaboAPIToken = os.Getenv("CONTABO_API_TOKEN")
+	// Get Contabo OAuth2 credentials from environment if not provided via flags
+	if contaboClientID == "" {
+		contaboClientID = os.Getenv("CONTABO_CLIENT_ID")
 	}
-	if contaboAPIToken == "" {
-		setupLog.Error(fmt.Errorf("contabo API token is required"),
-			"set via --contabo-api-token flag or CONTABO_API_TOKEN environment variable")
+	if contaboClientSecret == "" {
+		contaboClientSecret = os.Getenv("CONTABO_CLIENT_SECRET")
+	}
+	if contaboAPIUser == "" {
+		contaboAPIUser = os.Getenv("CONTABO_API_USER")
+	}
+	if contaboAPIPassword == "" {
+		contaboAPIPassword = os.Getenv("CONTABO_API_PASSWORD")
+	}
+
+	// Validate OAuth2 credentials
+	if contaboClientID == "" || contaboClientSecret == "" || contaboAPIUser == "" || contaboAPIPassword == "" {
+		setupLog.Error(fmt.Errorf("contabo OAuth2 credentials are required"),
+			"set via flags or environment variables: CONTABO_CLIENT_ID, CONTABO_CLIENT_SECRET, CONTABO_API_USER, CONTABO_API_PASSWORD")
 		os.Exit(1)
 	}
 
-	// Initialize Contabo OpenAPI client
+	// Create OAuth2 token manager for automatic token refresh
+	tokenManager := auth.NewTokenManager(contaboClientID, contaboClientSecret, contaboAPIUser, contaboAPIPassword)
+
+	// Test initial token acquisition
+	_, err := tokenManager.GetToken()
+	if err != nil {
+		setupLog.Error(err, "failed to get initial OAuth2 access token")
+		os.Exit(1)
+	}
+
+	// Initialize Contabo OpenAPI client with token manager
 	contaboClient, err := contaboclient.NewClient(
 		"https://api.contabo.com",
 		contaboclient.WithRequestEditorFn(func(ctx context.Context, req *http.Request) error {
-			req.Header.Set("Authorization", "Bearer "+contaboAPIToken)
+			token, err := tokenManager.GetToken()
+			if err != nil {
+				return fmt.Errorf("failed to get access token: %w", err)
+			}
+			req.Header.Set("Authorization", "Bearer "+token)
 			return nil
 		}),
 	)
