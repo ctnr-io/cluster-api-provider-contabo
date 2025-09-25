@@ -119,6 +119,8 @@ type ContaboDataCenterStatus struct {
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.ready",description="Cluster infrastructure is ready"
 // +kubebuilder:printcolumn:name="VPC",type="string",JSONPath=".status.network.vpcId",description="VPC ID"
 // +kubebuilder:printcolumn:name="Endpoint",type="string",JSONPath=".spec.controlPlaneEndpoint.host",description="API Endpoint",priority=1
+// +kubebuilder:resource:path=contaboclusters,scope=Namespaced,categories=cluster-api
+// +kubebuilder:storageversion
 
 // ContaboCluster is the Schema for the contaboclusters API
 type ContaboCluster struct {

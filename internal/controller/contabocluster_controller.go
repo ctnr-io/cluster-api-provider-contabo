@@ -311,44 +311,62 @@ func (r *ContaboClusterReconciler) ensurePrivateNetwork(ctx context.Context, con
 func (r *ContaboClusterReconciler) findPrivateNetworkByName(ctx context.Context, networkName string) (*infrastructurev1beta1.ContaboPrivateNetworkStatus, error) {
 	log := logf.FromContext(ctx)
 
-	// Call Contabo API to list all private networks
-	params := &models.RetrievePrivateNetworkListParams{}
-	resp, err := r.ContaboClient.RetrievePrivateNetworkList(ctx, params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve private network list: %w", err)
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			log.Error(closeErr, "failed to close response body")
+	// Iterate through all pages to find the network
+	page := int64(1)
+	size := int64(100) // Maximum page size
+
+	for {
+		// Call Contabo API to list private networks with pagination
+		params := &models.RetrievePrivateNetworkListParams{
+			Page: &page,
+			Size: &size,
 		}
-	}()
-
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("unexpected status code %d when listing private networks", resp.StatusCode)
-	}
-
-	// Parse the response
-	var listResponse models.ListPrivateNetworkResponse
-	if err := json.NewDecoder(resp.Body).Decode(&listResponse); err != nil {
-		return nil, fmt.Errorf("failed to decode private network list response: %w", err)
-	}
-
-	// Search for network with matching name
-	for _, network := range listResponse.Data {
-		if network.Name == networkName {
-			log.Info("Found existing private network", "networkName", networkName, "networkID", network.PrivateNetworkId)
-
-			return &infrastructurev1beta1.ContaboPrivateNetworkStatus{
-				Name:       network.Name,
-				ID:         strconv.FormatInt(network.PrivateNetworkId, 10),
-				CIDR:       network.Cidr,
-				DataCenter: network.DataCenter,
-				Region:     network.Region,
-			}, nil
+		resp, err := r.ContaboClient.RetrievePrivateNetworkList(ctx, params)
+		if err != nil {
+			return nil, fmt.Errorf("failed to retrieve private network list (page %d): %w", page, err)
 		}
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Error(closeErr, "failed to close response body")
+			}
+		}()
+
+		if resp.StatusCode != 200 {
+			return nil, fmt.Errorf("unexpected status code %d when listing private networks (page %d)", resp.StatusCode, page)
+		}
+
+		// Parse the response
+		var listResponse models.ListPrivateNetworkResponse
+		if err := json.NewDecoder(resp.Body).Decode(&listResponse); err != nil {
+			return nil, fmt.Errorf("failed to decode private network list response (page %d): %w", page, err)
+		}
+
+		// Search for network with matching name in current page
+		for _, network := range listResponse.Data {
+			if network.Name == networkName {
+				log.Info("Found existing private network", "networkName", networkName, "networkID", network.PrivateNetworkId)
+
+				return &infrastructurev1beta1.ContaboPrivateNetworkStatus{
+					Name:       network.Name,
+					ID:         strconv.FormatInt(network.PrivateNetworkId, 10),
+					CIDR:       network.Cidr,
+					DataCenter: network.DataCenter,
+					Region:     network.Region,
+				}, nil
+			}
+		}
+
+		// Check if there are more pages
+		if len(listResponse.Data) < int(size) {
+			// This was the last page
+			break
+		}
+
+		// Move to next page
+		page++
 	}
 
-	// Network not found
+	// Network not found in any page
 	log.V(1).Info("Private network not found by name", "networkName", networkName)
 	return nil, nil
 }

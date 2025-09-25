@@ -144,7 +144,6 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return r.reconcileNormal(ctx, machine, contaboMachine, contaboCluster)
 }
 
-//nolint:unparam // reconcileNormal may return different ctrl.Result values in future implementations
 func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta1.ContaboMachine, contaboCluster *infrastructurev1beta1.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -229,7 +228,6 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 	return ctrl.Result{}, nil
 }
 
-//nolint:unparam // reconcileDelete may return different ctrl.Result values in future implementations
 func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta1.ContaboMachine, contaboCluster *infrastructurev1beta1.ContaboCluster) (ctrl.Result, error) {
 	_ = contaboCluster // may be used in future for cluster-specific cleanup logic
 	log := logf.FromContext(ctx)
@@ -401,8 +399,6 @@ func (r *ContaboMachineReconciler) reconcileInstance(ctx context.Context, machin
 }
 
 // findAvailableInstance searches for an available instance that can be reused
-//
-//nolint:unparam // stub implementation always returns nil, will be fixed when implementing actual API calls
 func (r *ContaboMachineReconciler) findAvailableInstance(ctx context.Context, contaboMachine *infrastructurev1beta1.ContaboMachine) (*models.InstanceResponse, error) {
 	log := logf.FromContext(ctx)
 
@@ -518,8 +514,6 @@ func (r *ContaboMachineReconciler) reinstallInstance(ctx context.Context, instan
 }
 
 // waitForInstanceReady waits for an instance to be in running state and cloud-init to complete
-//
-//nolint:unparam // stub implementation always returns nil error, will be fixed when implementing actual API calls
 func (r *ContaboMachineReconciler) waitForInstanceReady(ctx context.Context, instanceID int64, operation string) (*models.InstanceResponse, error) {
 	log := logf.FromContext(ctx)
 
@@ -576,8 +570,6 @@ func (r *ContaboMachineReconciler) waitForInstanceReady(ctx context.Context, ins
 }
 
 // ensureInstanceClusterBinding binds an instance to a cluster via displayName
-//
-//nolint:unparam // stub implementation always returns nil, will be fixed when implementing actual API calls
 func (r *ContaboMachineReconciler) ensureInstanceClusterBinding(ctx context.Context, instance *models.InstanceResponse, clusterID string) error {
 	log := logf.FromContext(ctx)
 

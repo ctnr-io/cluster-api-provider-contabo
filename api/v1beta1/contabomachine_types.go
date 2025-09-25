@@ -173,6 +173,8 @@ type ContaboMachineNetworkStatus struct {
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.ready",description="Machine ready status"
 // +kubebuilder:printcolumn:name="ProviderID",type="string",JSONPath=".spec.providerID",description="Contabo instance ID"
 // +kubebuilder:printcolumn:name="Machine",type="string",JSONPath=".metadata.ownerReferences[?(@.kind==\"Machine\")].name",description="Machine object which owns this ContaboMachine"
+// +kubebuilder:resource:path=contabomachines,scope=Namespaced,categories=cluster-api
+// +kubebuilder:storageversion
 
 // ContaboMachine is the Schema for the contabomachines API
 type ContaboMachine struct {

@@ -8,6 +8,8 @@ resources:
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
+# Add Cluster API contract version labels
+- path: patches/cluster_api_labels.yaml
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
 # patches here are for enabling the conversion webhook for each CRD
 # +kubebuilder:scaffold:crdkustomizewebhookpatch

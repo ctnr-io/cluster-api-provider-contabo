@@ -72,6 +72,8 @@ var _ = Describe("Manager", Ordered, func() {
 		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", projectImage))
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
+
+		By("skipping CAPI core installation - testing provider controller in isolation")
 	})
 
 	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,
@@ -83,6 +85,10 @@ var _ = Describe("Manager", Ordered, func() {
 
 		By("cleaning up the metrics ClusterRoleBinding")
 		cmd = exec.Command("kubectl", "delete", "clusterrolebinding", metricsRoleBindingName, "--ignore-not-found=true")
+		_, _ = utils.Run(cmd)
+
+		By("cleaning up CAPI core components")
+		cmd = exec.Command("clusterctl", "delete", "--all", "--include-crd", "--include-namespace")
 		_, _ = utils.Run(cmd)
 
 		By("undeploying the controller-manager")
@@ -354,6 +360,29 @@ spec:
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to apply cluster manifest")
 
+			By("debugging CAPI components status")
+			cmd = exec.Command("kubectl", "get", "pods", "--all-namespaces", "-l", "cluster-api")
+			capiPods, err := utils.Run(cmd)
+			if err == nil {
+				fmt.Printf("CAPI pods found:\n%s\n", capiPods)
+			} else {
+				fmt.Printf("No CAPI pods found or error: %s\n", err)
+			}
+
+			By("checking for CAPI CRDs")
+			cmd = exec.Command("kubectl", "get", "crd", "-o", "name")
+			crds, err := utils.Run(cmd)
+			if err == nil {
+				if len(crds) > 0 {
+					fmt.Printf("Found CRDs, checking for CAPI ones...\n")
+					cmd = exec.Command("kubectl", "get", "crd", "-o", "name")
+					output, _ := utils.Run(cmd)
+					if output != "" {
+						fmt.Printf("Sample CRDs: %s\n", output[:min(500, len(output))])
+					}
+				}
+			}
+
 			By("verifying the Cluster resource is created")
 			Eventually(func(g Gomega) {
 				cmd := exec.Command("kubectl", "get", "cluster", "test-cluster-e2e", "-n", testNamespace, "-o", "jsonpath={.metadata.name}")
@@ -539,4 +568,13 @@ type tokenRequest struct {
 	Status struct {
 		Token string `json:"token"`
 	} `json:"status"`
+}
+
+// getProjectImage returns the project image name for the e2e tests
+func getProjectImage() string {
+	projectImage := os.Getenv("IMG")
+	if projectImage == "" {
+		projectImage = "cluster-api-provider-contabo:latest"
+	}
+	return projectImage
 }
