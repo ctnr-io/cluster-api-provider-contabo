@@ -19,8 +19,10 @@ package auth
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,8 +64,8 @@ func NewTokenManager(clientID, clientSecret, apiUser, apiPassword string) *Token
 // GetToken returns a valid access token, refreshing if necessary
 func (tm *TokenManager) GetToken() (string, error) {
 	tm.mu.RLock()
-	// Check if token is still valid (with 5 minute buffer)
-	if tm.accessToken != "" && time.Now().Add(5*time.Minute).Before(tm.expiresAt) {
+	// Check if token is still valid
+	if tm.accessToken != "" && time.Now().Before(tm.expiresAt) {
 		token := tm.accessToken
 		tm.mu.RUnlock()
 		return token, nil
@@ -80,7 +82,7 @@ func (tm *TokenManager) refreshToken() (string, error) {
 	defer tm.mu.Unlock()
 
 	// Double-check in case another goroutine already refreshed
-	if tm.accessToken != "" && time.Now().Add(5*time.Minute).Before(tm.expiresAt) {
+	if tm.accessToken != "" && time.Now().Before(tm.expiresAt) {
 		return tm.accessToken, nil
 	}
 
@@ -93,7 +95,17 @@ func (tm *TokenManager) refreshToken() (string, error) {
 	data.Set("password", tm.apiPassword)
 	data.Set("grant_type", "password")
 
-	resp, err := http.PostForm(tm.tokenURL, data)
+	// Create HTTP request with proper headers
+	req, err := http.NewRequest("POST", tm.tokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("failed to create OAuth2 request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to request OAuth2 token: %w", err)
 	}
@@ -104,7 +116,9 @@ func (tm *TokenManager) refreshToken() (string, error) {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("OAuth2 token request failed with status %d", resp.StatusCode)
+		// Read all the response body
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("OAuth2 token request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var tokenResp OAuth2TokenResponse
@@ -125,7 +139,7 @@ func (tm *TokenManager) refreshToken() (string, error) {
 func (tm *TokenManager) IsTokenValid() bool {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
-	return tm.accessToken != "" && time.Now().Add(5*time.Minute).Before(tm.expiresAt)
+	return tm.accessToken != "" && time.Now().Before(tm.expiresAt)
 }
 
 // GetExpirationTime returns when the current token expires

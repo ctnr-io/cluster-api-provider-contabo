@@ -1,8 +1,9 @@
 resources:
 - manager.yaml
+- contabo-credentials.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 images:
 - name: controller
-  newName: controller
-  newTag: latest
+  newName: ctnr.io/cluster-api-provider-contabo
+  newTag: v0.0.1

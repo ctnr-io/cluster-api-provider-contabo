@@ -66,6 +66,35 @@ spec:
         image: controller:latest
         imagePullPolicy: IfNotPresent
         name: manager
+        env:
+        - name: CONTABO_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: contabo-credentials
+              key: client-id
+              optional: true
+        - name: CONTABO_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: contabo-credentials
+              key: client-secret
+              optional: true
+        - name: CONTABO_API_USER
+          valueFrom:
+            secretKeyRef:
+              name: contabo-credentials
+              key: api-user
+              optional: true
+        - name: CONTABO_API_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: contabo-credentials
+              key: api-password
+              optional: true
+        - name: CONTROLLER_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         ports: []
         securityContext:
           readOnlyRootFilesystem: true

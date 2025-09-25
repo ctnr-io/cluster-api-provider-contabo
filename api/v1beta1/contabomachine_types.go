@@ -38,8 +38,6 @@ type ContaboMachineSpec struct {
 	// +kubebuilder:validation:Required
 	Region string `json:"region"`
 
-	// Note: Image is standardized to Ubuntu 22.04 LTS and not configurable per machine
-
 	// SSHKeys is a list of SSH key names to be added to the machine.
 	// +optional
 	SSHKeys []string `json:"sshKeys,omitempty"`

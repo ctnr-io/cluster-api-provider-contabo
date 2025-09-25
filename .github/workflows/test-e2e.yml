@@ -27,6 +27,13 @@ jobs:
         run: kind version
 
       - name: Running Test e2e
+        env:
+          CONTABO_CLIENT_ID: ${{ secrets.CONTABO_CLIENT_ID }}
+          CONTABO_CLIENT_SECRET: ${{ secrets.CONTABO_CLIENT_SECRET }}
+          CONTABO_API_USER: ${{ secrets.CONTABO_API_USER }}
+          CONTABO_API_PASSWORD: ${{ secrets.CONTABO_API_PASSWORD }}
         run: |
           go mod tidy
+          ./test/setup-e2e.sh
           make test-e2e
+
