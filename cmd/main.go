@@ -17,9 +17,11 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -39,7 +41,7 @@ import (
 
 	infrastructurev1beta1 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta1"
 	"github.com/ctnr-io/cluster-api-provider-contabo/internal/controller"
-	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/cloud"
+	contaboclient "github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/client"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -104,8 +106,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize Contabo service
-	contaboService := cloud.NewContaboService(contaboAPIToken)
+	// Initialize Contabo OpenAPI client
+	contaboClient, err := contaboclient.NewClient("https://api.contabo.com", contaboclient.WithRequestEditorFn(func(ctx context.Context, req *http.Request) error {
+		req.Header.Set("Authorization", "Bearer "+contaboAPIToken)
+		return nil
+	}))
+	if err != nil {
+		setupLog.Error(err, "unable to create Contabo API client")
+		os.Exit(1)
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -199,19 +208,19 @@ func main() {
 	}
 
 	if err := (&controller.ContaboClusterReconciler{
-		Client:         mgr.GetClient(),
-		Scheme:         mgr.GetScheme(),
-		Recorder:       mgr.GetEventRecorderFor("contabocluster-controller"),
-		ContaboService: contaboService,
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		Recorder:      mgr.GetEventRecorderFor("contabocluster-controller"),
+		ContaboClient: contaboClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ContaboCluster")
 		os.Exit(1)
 	}
 	if err := (&controller.ContaboMachineReconciler{
-		Client:         mgr.GetClient(),
-		Scheme:         mgr.GetScheme(),
-		Recorder:       mgr.GetEventRecorderFor("contabomachine-controller"),
-		ContaboService: contaboService,
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		Recorder:      mgr.GetEventRecorderFor("contabomachine-controller"),
+		ContaboClient: contaboClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ContaboMachine")
 		os.Exit(1)

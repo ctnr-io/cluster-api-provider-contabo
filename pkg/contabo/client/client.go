@@ -1,6 +1,3 @@
-//go:build !codeanalysis
-// +build !codeanalysis
-
 // Package client provides primitives to interact with the openapi HTTP API.
 package client
 

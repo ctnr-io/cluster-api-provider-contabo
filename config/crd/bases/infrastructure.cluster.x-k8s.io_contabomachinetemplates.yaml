@@ -91,9 +91,6 @@ spec:
                               membership tags
                             type: string
                         type: object
-                      image:
-                        description: Image is the OS image to use for the machine.
-                        type: string
                       instanceType:
                         description: InstanceType is the Contabo instance type for
                           the machine.
@@ -133,7 +130,6 @@ spec:
                           the machine.
                         type: string
                     required:
-                    - image
                     - instanceType
                     - region
                     type: object

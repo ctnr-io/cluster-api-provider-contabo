@@ -37,15 +37,15 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	infrastructurev1beta1 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta1"
-	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/cloud"
+	contaboclient "github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/client"
 )
 
 // ContaboClusterReconciler reconciles a ContaboCluster object
 type ContaboClusterReconciler struct {
 	client.Client
-	Scheme         *runtime.Scheme
-	Recorder       record.EventRecorder
-	ContaboService *cloud.ContaboService
+	Scheme        *runtime.Scheme
+	Recorder      record.EventRecorder
+	ContaboClient *contaboclient.Client
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=contaboclusters,verbs=get;list;watch;create;update;patch;delete
