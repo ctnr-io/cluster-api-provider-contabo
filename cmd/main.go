@@ -107,10 +107,13 @@ func main() {
 	}
 
 	// Initialize Contabo OpenAPI client
-	contaboClient, err := contaboclient.NewClient("https://api.contabo.com", contaboclient.WithRequestEditorFn(func(ctx context.Context, req *http.Request) error {
-		req.Header.Set("Authorization", "Bearer "+contaboAPIToken)
-		return nil
-	}))
+	contaboClient, err := contaboclient.NewClient(
+		"https://api.contabo.com",
+		contaboclient.WithRequestEditorFn(func(ctx context.Context, req *http.Request) error {
+			req.Header.Set("Authorization", "Bearer "+contaboAPIToken)
+			return nil
+		}),
+	)
 	if err != nil {
 		setupLog.Error(err, "unable to create Contabo API client")
 		os.Exit(1)

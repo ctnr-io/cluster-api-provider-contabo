@@ -27,9 +27,8 @@ metadata:
 spec:
   region: "EU"
   network:
-    subnets:
-    - name: "default"
-      cidr: "10.0.0.0/16"
+    privateNetworks:
+    - name: "default-network"
 ---
 apiVersion: controlplane.cluster.x-k8s.io/v1beta1
 kind: KubeadmControlPlane

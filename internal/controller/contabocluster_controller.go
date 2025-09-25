@@ -18,6 +18,9 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strconv"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -38,6 +41,7 @@ import (
 
 	infrastructurev1beta1 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta1"
 	contaboclient "github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/client"
+	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/models"
 )
 
 // ContaboClusterReconciler reconciles a ContaboCluster object
@@ -100,10 +104,10 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Handle non-deleted clusters
-	return r.reconcileNormal(ctx, cluster, contaboCluster)
+	return r.reconcileNormal(ctx, contaboCluster)
 }
 
-func (r *ContaboClusterReconciler) reconcileNormal(ctx context.Context, cluster *clusterv1.Cluster, contaboCluster *infrastructurev1beta1.ContaboCluster) (ctrl.Result, error) {
+func (r *ContaboClusterReconciler) reconcileNormal(ctx context.Context, contaboCluster *infrastructurev1beta1.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	// If the ContaboCluster doesn't have our finalizer, add it.
@@ -113,7 +117,7 @@ func (r *ContaboClusterReconciler) reconcileNormal(ctx context.Context, cluster 
 	conditions.MarkFalse(contaboCluster, infrastructurev1beta1.ReadyCondition, infrastructurev1beta1.CreatingReason, clusterv1.ConditionSeverityInfo, "")
 
 	// Reconcile network infrastructure
-	if err := r.reconcileNetwork(ctx, cluster, contaboCluster); err != nil {
+	if err := r.reconcileNetwork(ctx, contaboCluster); err != nil {
 		log.Error(err, "failed to reconcile network")
 		conditions.MarkFalse(contaboCluster, infrastructurev1beta1.ReadyCondition, infrastructurev1beta1.NetworkInfrastructureFailedReason, clusterv1.ConditionSeverityError, "Failed to reconcile network: %s", err.Error())
 		return ctrl.Result{}, err
@@ -142,7 +146,7 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, cluster 
 	log.Info("Reconciling ContaboCluster delete")
 
 	// Delete network infrastructure
-	if err := r.deleteNetwork(ctx, cluster, contaboCluster); err != nil {
+	if err := r.deleteNetwork(ctx, contaboCluster); err != nil {
 		log.Error(err, "failed to delete network")
 		return ctrl.Result{}, err
 	}
@@ -153,28 +157,362 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, cluster 
 	return ctrl.Result{}, nil
 }
 
-//nolint:unparam // reconcileNetwork may return different errors in future implementations
-func (r *ContaboClusterReconciler) reconcileNetwork(ctx context.Context, cluster *clusterv1.Cluster, contaboCluster *infrastructurev1beta1.ContaboCluster) error {
-	_ = cluster // may be used in future for cluster-specific network configuration
+func (r *ContaboClusterReconciler) reconcileNetwork(ctx context.Context, contaboCluster *infrastructurev1beta1.ContaboCluster) error {
 	log := logf.FromContext(ctx)
 
-	// For now, we'll just initialize the network status
-	// In a real implementation, you would create VPCs, subnets, etc.
+	// Initialize network status if not present
 	if contaboCluster.Status.Network == nil {
 		contaboCluster.Status.Network = &infrastructurev1beta1.ContaboNetworkStatus{}
+	}
+
+	// If no network spec is provided, skip network reconciliation
+	if contaboCluster.Spec.Network == nil {
+		log.Info("No network specification provided, skipping network reconciliation")
+		return nil
+	}
+
+	// Reconcile private networks
+	if err := r.reconcilePrivateNetworks(ctx, contaboCluster); err != nil {
+		log.Error(err, "failed to reconcile private networks")
+		return err
 	}
 
 	log.Info("Network infrastructure reconciled successfully")
 	return nil
 }
 
-func (r *ContaboClusterReconciler) deleteNetwork(ctx context.Context, cluster *clusterv1.Cluster, contaboCluster *infrastructurev1beta1.ContaboCluster) error {
+func (r *ContaboClusterReconciler) reconcilePrivateNetworks(ctx context.Context, contaboCluster *infrastructurev1beta1.ContaboCluster) error {
 	log := logf.FromContext(ctx)
 
-	// For now, we'll just log the deletion
-	// In a real implementation, you would delete VPCs, subnets, etc.
+	if contaboCluster.Spec.Network == nil || len(contaboCluster.Spec.Network.PrivateNetworks) == 0 {
+		return nil
+	}
+
+	// Initialize private network status slice if not present
+	if contaboCluster.Status.Network.PrivateNetworks == nil {
+		contaboCluster.Status.Network.PrivateNetworks = []infrastructurev1beta1.ContaboPrivateNetworkStatus{}
+	}
+
+	// Process each private network specification
+	for _, networkSpec := range contaboCluster.Spec.Network.PrivateNetworks {
+		// Check if this network is already in status
+		found := false
+		for i, networkStatus := range contaboCluster.Status.Network.PrivateNetworks {
+			if networkStatus.Name == networkSpec.Name {
+				// Network already tracked in status, verify it still exists
+				if err := r.verifyPrivateNetworkExists(ctx, networkStatus.ID); err != nil {
+					log.Error(err, "private network no longer exists", "networkName", networkSpec.Name, "networkID", networkStatus.ID)
+					// Remove from status if it no longer exists
+					contaboCluster.Status.Network.PrivateNetworks = append(
+						contaboCluster.Status.Network.PrivateNetworks[:i],
+						contaboCluster.Status.Network.PrivateNetworks[i+1:]...,
+					)
+				}
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			// This is a new network specification, discover or create it
+			networkStatus, err := r.ensurePrivateNetwork(ctx, contaboCluster, networkSpec)
+			if err != nil {
+				log.Error(err, "failed to ensure private network", "networkName", networkSpec.Name)
+				return err
+			}
+
+			// Add to status
+			contaboCluster.Status.Network.PrivateNetworks = append(
+				contaboCluster.Status.Network.PrivateNetworks,
+				*networkStatus,
+			)
+		}
+	}
+
+	return nil
+}
+
+func (r *ContaboClusterReconciler) verifyPrivateNetworkExists(ctx context.Context, networkID string) error {
+	log := logf.FromContext(ctx)
+
+	// Convert networkID string to int64 as required by the API
+	privateNetworkId, err := strconv.ParseInt(networkID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid network ID format: %w", err)
+	}
+
+	// Call Contabo API to retrieve the specific private network
+	params := &models.RetrievePrivateNetworkParams{}
+	resp, err := r.ContaboClient.RetrievePrivateNetwork(ctx, privateNetworkId, params)
+	if err != nil {
+		log.Error(err, "failed to retrieve private network", "networkID", networkID)
+		return fmt.Errorf("failed to verify private network exists: %w", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Error(closeErr, "failed to close response body")
+		}
+	}()
+
+	// Check response status
+	if resp.StatusCode == 404 {
+		return fmt.Errorf("private network with ID %s not found", networkID)
+	}
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("unexpected status code %d when verifying private network %s", resp.StatusCode, networkID)
+	}
+
+	log.V(1).Info("Private network verified successfully", "networkID", networkID)
+	return nil
+}
+
+func (r *ContaboClusterReconciler) ensurePrivateNetwork(ctx context.Context, contaboCluster *infrastructurev1beta1.ContaboCluster, networkSpec infrastructurev1beta1.ContaboPrivateNetworkSpec) (*infrastructurev1beta1.ContaboPrivateNetworkStatus, error) {
+	log := logf.FromContext(ctx)
+
+	log.Info("Discovering/creating private network", "networkName", networkSpec.Name)
+
+	// First, try to find existing network by name
+	networkStatus, err := r.findPrivateNetworkByName(ctx, networkSpec.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search for existing private network: %w", err)
+	}
+
+	// If found, return the existing network
+	if networkStatus != nil {
+		log.Info("Found existing private network", "networkName", networkSpec.Name, "networkID", networkStatus.ID)
+		return networkStatus, nil
+	}
+
+	// Network not found, create a new one
+	log.Info("Private network not found, creating new one", "networkName", networkSpec.Name)
+	return r.createPrivateNetwork(ctx, contaboCluster, networkSpec)
+}
+
+func (r *ContaboClusterReconciler) findPrivateNetworkByName(ctx context.Context, networkName string) (*infrastructurev1beta1.ContaboPrivateNetworkStatus, error) {
+	log := logf.FromContext(ctx)
+
+	// Call Contabo API to list all private networks
+	params := &models.RetrievePrivateNetworkListParams{}
+	resp, err := r.ContaboClient.RetrievePrivateNetworkList(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve private network list: %w", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Error(closeErr, "failed to close response body")
+		}
+	}()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code %d when listing private networks", resp.StatusCode)
+	}
+
+	// Parse the response
+	var listResponse models.ListPrivateNetworkResponse
+	if err := json.NewDecoder(resp.Body).Decode(&listResponse); err != nil {
+		return nil, fmt.Errorf("failed to decode private network list response: %w", err)
+	}
+
+	// Search for network with matching name
+	for _, network := range listResponse.Data {
+		if network.Name == networkName {
+			log.Info("Found existing private network", "networkName", networkName, "networkID", network.PrivateNetworkId)
+
+			return &infrastructurev1beta1.ContaboPrivateNetworkStatus{
+				Name:       network.Name,
+				ID:         strconv.FormatInt(network.PrivateNetworkId, 10),
+				CIDR:       network.Cidr,
+				DataCenter: network.DataCenter,
+				Region:     network.Region,
+			}, nil
+		}
+	}
+
+	// Network not found
+	log.V(1).Info("Private network not found by name", "networkName", networkName)
+	return nil, nil
+}
+
+func (r *ContaboClusterReconciler) createPrivateNetwork(ctx context.Context, contaboCluster *infrastructurev1beta1.ContaboCluster, networkSpec infrastructurev1beta1.ContaboPrivateNetworkSpec) (*infrastructurev1beta1.ContaboPrivateNetworkStatus, error) {
+	log := logf.FromContext(ctx)
+
+	// Prepare create request
+	createRequest := models.CreatePrivateNetworkRequest{
+		Name: networkSpec.Name,
+	}
+
+	// Set optional description if provided in spec (for future extension)
+	description := fmt.Sprintf("Private network created by cluster-api-provider-contabo for network: %s", networkSpec.Name)
+	createRequest.Description = &description
+
+	// Use the cluster's region
+	createRequest.Region = &contaboCluster.Spec.Region
+
+	// Call Contabo API to create private network
+	params := &models.CreatePrivateNetworkParams{}
+	resp, err := r.ContaboClient.CreatePrivateNetwork(ctx, params, createRequest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create private network: %w", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Error(closeErr, "failed to close response body")
+		}
+	}()
+
+	if resp.StatusCode != 201 && resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code %d when creating private network", resp.StatusCode)
+	}
+
+	// Parse the response
+	var createResponse models.CreatePrivateNetworkResponse
+	if err := json.NewDecoder(resp.Body).Decode(&createResponse); err != nil {
+		return nil, fmt.Errorf("failed to decode create private network response: %w", err)
+	}
+
+	if len(createResponse.Data) == 0 {
+		return nil, fmt.Errorf("no data returned from create private network API")
+	}
+
+	// Extract the created network details
+	createdNetwork := createResponse.Data[0]
+	log.Info("Successfully created private network",
+		"networkName", createdNetwork.Name,
+		"networkID", createdNetwork.PrivateNetworkId,
+		"cidr", createdNetwork.Cidr,
+		"dataCenter", createdNetwork.DataCenter)
+
+	return &infrastructurev1beta1.ContaboPrivateNetworkStatus{
+		Name:       createdNetwork.Name,
+		ID:         strconv.FormatInt(createdNetwork.PrivateNetworkId, 10),
+		CIDR:       createdNetwork.Cidr,
+		DataCenter: createdNetwork.DataCenter,
+		Region:     createdNetwork.Region,
+	}, nil
+}
+
+func (r *ContaboClusterReconciler) deleteNetwork(ctx context.Context, contaboCluster *infrastructurev1beta1.ContaboCluster) error {
+	log := logf.FromContext(ctx)
+
+	// Delete private networks if they were created by this cluster
+	if err := r.deletePrivateNetworks(ctx, contaboCluster); err != nil {
+		log.Error(err, "failed to delete private networks")
+		return err
+	}
+
 	log.Info("Network infrastructure deleted successfully")
 	return nil
+}
+
+func (r *ContaboClusterReconciler) deletePrivateNetworks(ctx context.Context, contaboCluster *infrastructurev1beta1.ContaboCluster) error {
+	log := logf.FromContext(ctx)
+
+	if contaboCluster.Status.Network == nil || len(contaboCluster.Status.Network.PrivateNetworks) == 0 {
+		return nil
+	}
+
+	// Delete each private network that was tracked in status
+	for _, networkStatus := range contaboCluster.Status.Network.PrivateNetworks {
+		log.Info("Deleting private network", "networkName", networkStatus.Name, "networkID", networkStatus.ID)
+
+		// Convert networkID string to int64 as required by the API
+		privateNetworkId, err := strconv.ParseInt(networkStatus.ID, 10, 64)
+		if err != nil {
+			log.Error(err, "invalid network ID format during deletion", "networkID", networkStatus.ID)
+			continue // Skip this network and try others
+		}
+
+		// Step 1: Retrieve private network to check if it exists and get instance information
+		networkData, err := r.retrievePrivateNetworkData(ctx, privateNetworkId)
+		if err != nil {
+			// Step 2: If not exists, tell it's not exists
+			log.Info("Private network does not exist, already deleted", "networkName", networkStatus.Name, "networkID", networkStatus.ID)
+			continue // Network already gone, nothing to delete
+		}
+
+		// Step 3: Check if it has instances on it
+		instanceCount := len(networkData.Instances)
+		if instanceCount > 0 {
+			// Step 4: Tell it will not be deleted but that's ok
+			log.Info("Private network has instances attached, will not be deleted (this is expected)",
+				"networkName", networkStatus.Name,
+				"networkID", networkStatus.ID,
+				"instanceCount", instanceCount)
+			continue // Skip deletion, but this is normal behavior
+		}
+
+		log.Info("Private network has no instances, proceeding with deletion",
+			"networkName", networkStatus.Name, "networkID", networkStatus.ID)
+
+		// Call Contabo API to delete private network
+		params := &models.DeletePrivateNetworkParams{}
+		resp, err := r.ContaboClient.DeletePrivateNetwork(ctx, privateNetworkId, params)
+		if err != nil {
+			log.Error(err, "failed to delete private network", "networkName", networkStatus.Name, "networkID", networkStatus.ID)
+			return fmt.Errorf("failed to delete private network %s (ID: %s): %w", networkStatus.Name, networkStatus.ID, err)
+		}
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Error(closeErr, "failed to close response body")
+			}
+		}()
+
+		if resp.StatusCode != 204 && resp.StatusCode != 200 && resp.StatusCode != 404 {
+			// Check if error is due to instances still being attached
+			if resp.StatusCode == 422 || resp.StatusCode == 400 {
+				log.Info("Private network cannot be deleted - likely has instances still attached",
+					"networkName", networkStatus.Name, "networkID", networkStatus.ID, "statusCode", resp.StatusCode)
+				continue // Skip this network and try others
+			}
+			return fmt.Errorf("unexpected status code %d when deleting private network %s (ID: %s)", resp.StatusCode, networkStatus.Name, networkStatus.ID)
+		}
+
+		log.Info("Private network deletion completed", "networkName", networkStatus.Name, "networkID", networkStatus.ID)
+	}
+
+	return nil
+}
+
+func (r *ContaboClusterReconciler) retrievePrivateNetworkData(ctx context.Context, privateNetworkId int64) (*models.PrivateNetworkResponse, error) {
+	log := logf.FromContext(ctx)
+
+	// Step 1: Retrieve private network
+	params := &models.RetrievePrivateNetworkParams{}
+	resp, err := r.ContaboClient.RetrievePrivateNetwork(ctx, privateNetworkId, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve private network: %w", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Error(closeErr, "failed to close response body")
+		}
+	}()
+
+	// Step 2: If not exists (404), return error
+	if resp.StatusCode == 404 {
+		return nil, fmt.Errorf("private network not found")
+	}
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code %d when retrieving private network", resp.StatusCode)
+	}
+
+	// Parse the response
+	var networkResponse models.FindPrivateNetworkResponse
+	if err := json.NewDecoder(resp.Body).Decode(&networkResponse); err != nil {
+		return nil, fmt.Errorf("failed to decode private network response: %w", err)
+	}
+
+	if len(networkResponse.Data) == 0 {
+		return nil, fmt.Errorf("no private network data found in response")
+	}
+
+	log.V(1).Info("Successfully retrieved private network data",
+		"privateNetworkId", privateNetworkId,
+		"instanceCount", len(networkResponse.Data[0].Instances))
+
+	return &networkResponse.Data[0], nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

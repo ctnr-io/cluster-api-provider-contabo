@@ -37,57 +37,22 @@ type ContaboClusterSpec struct {
 	// Network configuration for the cluster
 	// +optional
 	Network *ContaboNetworkSpec `json:"network,omitempty"`
-
-	// ClusterTagging configures cluster-wide tagging for instance management
-	// +optional
-	ClusterTagging *ContaboClusterTaggingSpec `json:"clusterTagging,omitempty"`
 }
 
 // ContaboNetworkSpec defines network configuration for Contabo resources
+// Networks are referenced by name and their details (CIDR, datacenter) are discovered at runtime
 type ContaboNetworkSpec struct {
-	// VPC ID for the cluster resources
+	// PrivateNetworks is a list of private network names to use for the cluster
+	// The CIDR and datacenter information will be populated in the status after discovery
 	// +optional
-	VPCID *string `json:"vpcId,omitempty"`
-
-	// Subnet configuration
-	// +optional
-	Subnets []ContaboSubnetSpec `json:"subnets,omitempty"`
+	PrivateNetworks []ContaboPrivateNetworkSpec `json:"privateNetworks,omitempty"`
 }
 
-// ContaboSubnetSpec defines a subnet configuration
-type ContaboSubnetSpec struct {
-	// Name of the subnet
+// ContaboPrivateNetworkSpec defines a private network configuration
+type ContaboPrivateNetworkSpec struct {
+	// Name of the private network to use (must exist in Contabo)
+	// +kubebuilder:validation:Required
 	Name string `json:"name"`
-
-	// CIDR block for the subnet
-	CIDR string `json:"cidr"`
-
-	// Availability zone for the subnet
-	// +optional
-	AvailabilityZone *string `json:"availabilityZone,omitempty"`
-}
-
-// ContaboClusterTaggingSpec defines cluster membership tagging configuration
-type ContaboClusterTaggingSpec struct {
-	// Enabled specifies whether cluster membership tagging is enabled
-	// +kubebuilder:default=true
-	// +optional
-	Enabled *bool `json:"enabled,omitempty"`
-
-	// ClusterTag is the tag name to use for cluster membership
-	// +kubebuilder:default="cluster-api-cluster"
-	// +optional
-	ClusterTag string `json:"clusterTag,omitempty"`
-
-	// AvailableTag is the tag name to use when marking instances as available
-	// +kubebuilder:default="cluster-api-available"
-	// +optional
-	AvailableTag string `json:"availableTag,omitempty"`
-
-	// TagColor is the color to use for cluster membership tags
-	// +kubebuilder:default="#1E90FF"
-	// +optional
-	TagColor string `json:"tagColor,omitempty"`
 }
 
 // ContaboClusterStatus defines the observed state of ContaboCluster.
@@ -109,31 +74,43 @@ type ContaboClusterStatus struct {
 	FailureDomains clusterv1.FailureDomains `json:"failureDomains,omitempty"`
 }
 
-// ContaboNetworkStatus defines the network status
+// ContaboNetworkStatus defines the network status discovered from Contabo
 type ContaboNetworkStatus struct {
-	// VPCID is the ID of the VPC
+	// PrivateNetworks contains the discovered information about private networks
 	// +optional
-	VPCID *string `json:"vpcId,omitempty"`
+	PrivateNetworks []ContaboPrivateNetworkStatus `json:"privateNetworks,omitempty"`
 
-	// Subnets is a list of subnets
+	// DataCenter contains information about the datacenter where resources are located
+	// This is populated after instances are created and their datacenter is discovered
 	// +optional
-	Subnets []ContaboSubnetStatus `json:"subnets,omitempty"`
+	DataCenter *ContaboDataCenterStatus `json:"dataCenter,omitempty"`
 }
 
-// ContaboSubnetStatus defines the status of a subnet
-type ContaboSubnetStatus struct {
-	// Name of the subnet
+// ContaboPrivateNetworkStatus defines the status of a private network
+type ContaboPrivateNetworkStatus struct {
+	// Name of the private network
 	Name string `json:"name"`
 
-	// ID of the subnet
+	// ID of the private network in Contabo
 	ID string `json:"id"`
 
-	// CIDR block of the subnet
+	// CIDR block of the private network (discovered from Contabo)
 	CIDR string `json:"cidr"`
 
-	// AvailabilityZone of the subnet
-	// +optional
-	AvailabilityZone *string `json:"availabilityZone,omitempty"`
+	// DataCenter where this private network is located
+	DataCenter string `json:"dataCenter"`
+
+	// Region where this private network is located
+	Region string `json:"region"`
+}
+
+// ContaboDataCenterStatus defines datacenter information
+type ContaboDataCenterStatus struct {
+	// Name of the datacenter (e.g., "European Union (Germany)")
+	Name string `json:"name"`
+
+	// Code of the datacenter (e.g., "EU")
+	Code string `json:"code"`
 }
 
 // +kubebuilder:object:root=true

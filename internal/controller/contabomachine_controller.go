@@ -29,7 +29,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -53,46 +52,6 @@ import (
 	contaboclient "github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/client"
 	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/models"
 )
-
-// Helper functions for provider ID handling and state management
-
-// parseProviderID extracts the instance ID from a provider ID string
-func parseProviderID(providerID string) (int64, error) {
-	// Provider ID format: "contabo://instanceId"
-	const prefix = "contabo://"
-	if !strings.HasPrefix(providerID, prefix) {
-		return 0, fmt.Errorf("invalid provider ID format: %s", providerID)
-	}
-
-	instanceIDStr := strings.TrimPrefix(providerID, prefix)
-	instanceID, err := strconv.ParseInt(instanceIDStr, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid instance ID in provider ID: %w", err)
-	}
-
-	return instanceID, nil
-}
-
-// buildProviderID creates a provider ID from an instance ID
-func buildProviderID(instanceID int64) string {
-	return fmt.Sprintf("contabo://%d", instanceID)
-}
-
-// mapInstanceStatus maps OpenAPI instance status to our CRD status
-func mapInstanceStatus(status models.InstanceStatus) infrastructurev1beta1.ContaboMachineInstanceState {
-	switch status {
-	case models.InstanceStatusRunning:
-		return infrastructurev1beta1.ContaboMachineInstanceStateRunning
-	case models.InstanceStatusStopped:
-		return infrastructurev1beta1.ContaboMachineInstanceStateStopped
-	case models.InstanceStatusInstalling, models.InstanceStatusProvisioning, models.InstanceStatusManualProvisioning:
-		return infrastructurev1beta1.ContaboMachineInstanceStatePending
-	case models.InstanceStatusError:
-		return infrastructurev1beta1.ContaboMachineInstanceStateTerminated
-	default:
-		return infrastructurev1beta1.ContaboMachineInstanceStateUnknown
-	}
-}
 
 // ContaboMachineReconciler reconciles a ContaboMachine object
 type ContaboMachineReconciler struct {
@@ -240,7 +199,7 @@ func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, machine 
 
 	// Set instance back to available state for reuse
 	if contaboMachine.Spec.ProviderID != nil {
-		instanceID, err := parseProviderID(*contaboMachine.Spec.ProviderID)
+		instanceID, err := ParseProviderID(*contaboMachine.Spec.ProviderID)
 		if err == nil {
 			if err := r.removeClusterBinding(ctx, instanceID); err != nil {
 				log.Error(err, "failed to set instance state to available")
@@ -266,7 +225,7 @@ func (r *ContaboMachineReconciler) reconcileInstance(ctx context.Context, machin
 
 	// If we already have a provider ID, fetch the existing instance
 	if contaboMachine.Spec.ProviderID != nil {
-		instanceID, err := parseProviderID(*contaboMachine.Spec.ProviderID)
+		instanceID, err := ParseProviderID(*contaboMachine.Spec.ProviderID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse provider ID: %w", err)
 		}
@@ -377,6 +336,8 @@ func (r *ContaboMachineReconciler) reconcileInstance(ctx context.Context, machin
 }
 
 // findAvailableInstance searches for an available instance that can be reused
+//
+//nolint:unparam // stub implementation always returns nil, will be fixed when implementing actual API calls
 func (r *ContaboMachineReconciler) findAvailableInstance(ctx context.Context, contaboMachine *infrastructurev1beta1.ContaboMachine) (*models.InstanceResponse, error) {
 	log := logf.FromContext(ctx)
 
@@ -404,6 +365,8 @@ func (r *ContaboMachineReconciler) reinstallInstance(ctx context.Context, instan
 }
 
 // waitForInstanceReady waits for an instance to be in running state and cloud-init to complete
+//
+//nolint:unparam // stub implementation always returns nil error, will be fixed when implementing actual API calls
 func (r *ContaboMachineReconciler) waitForInstanceReady(ctx context.Context, instanceID int64, operation string) (*models.InstanceResponse, error) {
 	log := logf.FromContext(ctx)
 
@@ -426,6 +389,8 @@ func (r *ContaboMachineReconciler) waitForInstanceReady(ctx context.Context, ins
 }
 
 // ensureInstanceClusterBinding binds an instance to a cluster via displayName
+//
+//nolint:unparam // stub implementation always returns nil, will be fixed when implementing actual API calls
 func (r *ContaboMachineReconciler) ensureInstanceClusterBinding(ctx context.Context, instance *models.InstanceResponse, clusterName string) error {
 	log := logf.FromContext(ctx)
 

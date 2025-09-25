@@ -262,14 +262,192 @@ var _ = Describe("Manager", Ordered, func() {
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks
 
-		// TODO: Customize the e2e test suite with scenarios specific to your project.
-		// Consider applying sample/CR(s) and check their status and/or verifying
-		// the reconciliation by using the metrics, i.e.:
-		// metricsOutput := getMetricsOutput()
-		// Expect(metricsOutput).To(ContainSubstring(
-		//    fmt.Sprintf(`controller_runtime_reconcile_total{controller="%s",result="success"} 1`,
-		//    strings.ToLower(<Kind>),
-		// ))
+		It("should successfully reconcile ContaboCluster lifecycle", func() {
+			By("creating a test namespace for cluster resources")
+			testNamespace := "contabo-cluster-e2e-test"
+			cmd := exec.Command("kubectl", "create", "namespace", testNamespace)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create test namespace")
+
+			defer func() {
+				By("cleaning up the test namespace")
+				cmd := exec.Command("kubectl", "delete", "namespace", testNamespace, "--ignore-not-found=true", "--timeout=120s")
+				_, _ = utils.Run(cmd)
+			}()
+
+			By("applying a complete ContaboCluster with private network configuration")
+			clusterManifest := fmt.Sprintf(`
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Cluster
+metadata:
+  name: test-cluster-e2e
+  namespace: %s
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+      - 192.168.0.0/16
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+    kind: ContaboCluster
+    name: test-cluster-e2e
+    namespace: %s
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: ContaboCluster
+metadata:
+  name: test-cluster-e2e
+  namespace: %s
+spec:
+  region: "EU"
+  controlPlaneEndpoint:
+    host: "10.0.0.100"
+    port: 6443
+  network:
+    privateNetworks:
+    - name: "test-e2e-private-network"
+`, testNamespace, testNamespace, testNamespace)
+
+			manifestFile := "/tmp/contabo-cluster-e2e-test.yaml"
+			err = os.WriteFile(manifestFile, []byte(clusterManifest), 0644)
+			Expect(err).NotTo(HaveOccurred(), "Failed to write cluster manifest")
+
+			cmd = exec.Command("kubectl", "apply", "-f", manifestFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply cluster manifest")
+
+			defer func() {
+				By("cleaning up cluster resources")
+				cmd := exec.Command("kubectl", "delete", "-f", manifestFile, "--ignore-not-found=true", "--timeout=60s")
+				_, _ = utils.Run(cmd)
+				_ = os.Remove(manifestFile)
+			}()
+
+			By("verifying the Cluster resource is created")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "cluster", "test-cluster-e2e", "-n", testNamespace, "-o", "jsonpath={.metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("test-cluster-e2e"), "Cluster resource should be created")
+			}, 30*time.Second, 5*time.Second).Should(Succeed())
+
+			By("verifying the ContaboCluster resource is created")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e", "-n", testNamespace, "-o", "jsonpath={.metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("test-cluster-e2e"), "ContaboCluster resource should be created")
+			}, 30*time.Second, 5*time.Second).Should(Succeed())
+
+			By("waiting for ContaboCluster controller to process the resource")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e", 
+					"-n", testNamespace, "-o", "jsonpath={.status}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).ToNot(BeEmpty(), "ContaboCluster status should be populated by controller")
+			}, 2*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("verifying private network configuration is processed")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e",
+					"-n", testNamespace, "-o", "jsonpath={.spec.network.privateNetworks[0].name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("test-e2e-private-network"), "Private network specification should be correct")
+			}, 30*time.Second, 5*time.Second).Should(Succeed())
+
+			By("checking controller logs for cluster reconciliation")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace, "--tail=100")
+				logs, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				
+				// Look for cluster reconciliation activity
+				g.Expect(logs).To(Or(
+					ContainSubstring("Reconciling ContaboCluster"),
+					ContainSubstring("reconciling contabocluster"),
+					ContainSubstring("test-cluster-e2e"),
+				), "Controller should show cluster reconciliation activity")
+			}, 2*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("verifying cluster finalizer is added")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e",
+					"-n", testNamespace, "-o", "jsonpath={.metadata.finalizers}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(ContainSubstring("contabocluster.infrastructure.cluster.x-k8s.io"), 
+					"ContaboCluster should have finalizer added")
+			}, 1*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("checking network reconciliation logs")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace, "--tail=200")
+				logs, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				
+				// Look for network reconciliation
+				g.Expect(logs).To(Or(
+					ContainSubstring("reconciling private networks"),
+					ContainSubstring("Network infrastructure reconciled"),
+					ContainSubstring("failed to reconcile network"),
+					ContainSubstring("Discovering/creating private network"),
+				), "Controller should attempt network reconciliation")
+			}, 2*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("verifying conditions are set on ContaboCluster")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e",
+					"-n", testNamespace, "-o", "jsonpath={.status.conditions}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).ToNot(BeEmpty(), "ContaboCluster should have status conditions")
+			}, 1*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("testing cluster deletion flow")
+			cmd = exec.Command("kubectl", "delete", "cluster", "test-cluster-e2e", "-n", testNamespace)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to delete cluster")
+
+			By("verifying ContaboCluster enters deletion flow")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e",
+					"-n", testNamespace, "-o", "jsonpath={.metadata.deletionTimestamp}")
+				output, err := utils.Run(cmd)
+				if err != nil {
+					// Resource may already be deleted
+					return
+				}
+				g.Expect(output).ToNot(BeEmpty(), "ContaboCluster should have deletion timestamp set")
+			}, 1*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("checking deletion reconciliation logs")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace, "--tail=100")
+				logs, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				
+				// Look for deletion activity
+				g.Expect(logs).To(Or(
+					ContainSubstring("Reconciling ContaboCluster delete"),
+					ContainSubstring("reconcileDelete"),
+					ContainSubstring("deleteNetwork"),
+				), "Controller should process cluster deletion")
+			}, 2*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("verifying resources are eventually cleaned up")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e", "-n", testNamespace)
+				_, err := utils.Run(cmd)
+				g.Expect(err).To(HaveOccurred(), "ContaboCluster should be deleted")
+			}, 2*time.Minute, 10*time.Second).Should(Succeed())
+
+			By("verifying controller metrics include ContaboCluster reconciliation")
+			metricsOutput := getMetricsOutput()
+			Expect(metricsOutput).To(ContainSubstring("contabocluster"), 
+				"Metrics should include ContaboCluster controller activity")
+		})
 	})
 })
 

@@ -56,10 +56,6 @@ type ContaboMachineSpec struct {
 	// +optional
 	AdditionalTags map[string]string `json:"additionalTags,omitempty"`
 
-	// ClusterTagging configures cluster membership tagging for cost management
-	// +optional
-	ClusterTagging *ContaboClusterTaggingSpec `json:"clusterTagging,omitempty"`
-
 	// Network configuration for the machine
 	// +optional
 	Network *ContaboMachineNetworkSpec `json:"network,omitempty"`

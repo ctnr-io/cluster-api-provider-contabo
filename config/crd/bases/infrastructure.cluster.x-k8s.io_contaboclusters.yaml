@@ -57,30 +57,6 @@ spec:
           spec:
             description: spec defines the desired state of ContaboCluster
             properties:
-              clusterTagging:
-                description: ClusterTagging configures cluster-wide tagging for instance
-                  management
-                properties:
-                  availableTag:
-                    default: cluster-api-available
-                    description: AvailableTag is the tag name to use when marking
-                      instances as available
-                    type: string
-                  clusterTag:
-                    default: cluster-api-cluster
-                    description: ClusterTag is the tag name to use for cluster membership
-                    type: string
-                  enabled:
-                    default: true
-                    description: Enabled specifies whether cluster membership tagging
-                      is enabled
-                    type: boolean
-                  tagColor:
-                    default: '#1E90FF'
-                    description: TagColor is the color to use for cluster membership
-                      tags
-                    type: string
-                type: object
               controlPlaneEndpoint:
                 description: ControlPlaneEndpoint represents the endpoint used to
                   communicate with the control plane.
@@ -99,28 +75,22 @@ spec:
               network:
                 description: Network configuration for the cluster
                 properties:
-                  subnets:
-                    description: Subnet configuration
+                  privateNetworks:
+                    description: |-
+                      PrivateNetworks is a list of private network names to use for the cluster
+                      The CIDR and datacenter information will be populated in the status after discovery
                     items:
-                      description: ContaboSubnetSpec defines a subnet configuration
+                      description: ContaboPrivateNetworkSpec defines a private network
+                        configuration
                       properties:
-                        availabilityZone:
-                          description: Availability zone for the subnet
-                          type: string
-                        cidr:
-                          description: CIDR block for the subnet
-                          type: string
                         name:
-                          description: Name of the subnet
+                          description: Name of the private network to use (must exist
+                            in Contabo)
                           type: string
                       required:
-                      - cidr
                       - name
                       type: object
                     type: array
-                  vpcId:
-                    description: VPC ID for the cluster resources
-                    type: string
                 type: object
               region:
                 description: Region is the Contabo region where the cluster will be
@@ -200,32 +170,53 @@ spec:
               network:
                 description: Network describes the cluster network configuration
                 properties:
-                  subnets:
-                    description: Subnets is a list of subnets
+                  dataCenter:
+                    description: |-
+                      DataCenter contains information about the datacenter where resources are located
+                      This is populated after instances are created and their datacenter is discovered
+                    properties:
+                      code:
+                        description: Code of the datacenter (e.g., "EU")
+                        type: string
+                      name:
+                        description: Name of the datacenter (e.g., "European Union
+                          (Germany)")
+                        type: string
+                    required:
+                    - code
+                    - name
+                    type: object
+                  privateNetworks:
+                    description: PrivateNetworks contains the discovered information
+                      about private networks
                     items:
-                      description: ContaboSubnetStatus defines the status of a subnet
+                      description: ContaboPrivateNetworkStatus defines the status
+                        of a private network
                       properties:
-                        availabilityZone:
-                          description: AvailabilityZone of the subnet
-                          type: string
                         cidr:
-                          description: CIDR block of the subnet
+                          description: CIDR block of the private network (discovered
+                            from Contabo)
+                          type: string
+                        dataCenter:
+                          description: DataCenter where this private network is located
                           type: string
                         id:
-                          description: ID of the subnet
+                          description: ID of the private network in Contabo
                           type: string
                         name:
-                          description: Name of the subnet
+                          description: Name of the private network
+                          type: string
+                        region:
+                          description: Region where this private network is located
                           type: string
                       required:
                       - cidr
+                      - dataCenter
                       - id
                       - name
+                      - region
                       type: object
                     type: array
-                  vpcId:
-                    description: VPCID is the ID of the VPC
-                    type: string
                 type: object
               ready:
                 description: Ready denotes that the cluster (infrastructure) is ready.

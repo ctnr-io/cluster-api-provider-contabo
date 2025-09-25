@@ -66,31 +66,6 @@ spec:
                         description: AdditionalTags is additional tags to be added
                           to the machine.
                         type: object
-                      clusterTagging:
-                        description: ClusterTagging configures cluster membership
-                          tagging for cost management
-                        properties:
-                          availableTag:
-                            default: cluster-api-available
-                            description: AvailableTag is the tag name to use when
-                              marking instances as available
-                            type: string
-                          clusterTag:
-                            default: cluster-api-cluster
-                            description: ClusterTag is the tag name to use for cluster
-                              membership
-                            type: string
-                          enabled:
-                            default: true
-                            description: Enabled specifies whether cluster membership
-                              tagging is enabled
-                            type: boolean
-                          tagColor:
-                            default: '#1E90FF'
-                            description: TagColor is the color to use for cluster
-                              membership tags
-                            type: string
-                        type: object
                       instanceType:
                         description: InstanceType is the Contabo instance type for
                           the machine.

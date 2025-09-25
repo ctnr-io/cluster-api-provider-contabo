@@ -45,6 +45,7 @@ linters:
       - third_party$
       - builtin$
       - examples$
+      - pkg/contabo/client/.*
 formatters:
   enable:
     - gofmt
@@ -55,3 +56,4 @@ formatters:
       - third_party$
       - builtin$
       - examples$
+      - pkg/contabo/client/.*
