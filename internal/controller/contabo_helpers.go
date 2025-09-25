@@ -23,6 +23,7 @@ import (
 
 	infrastructurev1beta1 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta1"
 	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/models"
+	"github.com/google/uuid"
 )
 
 const (
@@ -30,10 +31,25 @@ const (
 	ProviderIDPrefix = "contabo://"
 
 	// StateAvailable indicates an instance is available for cluster assignment
-	StateAvailable = "available"
+	StateAvailable = "capc-available"
 
-	// StateClusterBound indicates an instance is bound to a cluster
-	StateClusterBound = "cluster-bound"
+	// StateProvisioning indicates an instance is being provisioned for a cluster
+	StateProvisioning = "capc-provisioning"
+
+	// StateClusterBound indicates an instance is successfully bound to a cluster
+	StateClusterBound = "capc-cluster-bound"
+
+	// StateError indicates an instance failed provisioning and has an error
+	StateError = "capc-error"
+
+	// ClusterUUIDLabel is the label key used to store the unique cluster UUID
+	ClusterUUIDLabel = "cluster.x-k8s.io/capc-uuid"
+
+	// Display name state strings (used in parsing) - kept short to save space
+	stateAvailable    = "avl"
+	stateProvisioning = "prv"
+	stateBound        = "bnd"
+	stateError        = "err"
 
 	// DefaultUbuntuImageID is the standardized Ubuntu image used for all cluster nodes
 	// Using a fixed image ensures consistency, security, and compatibility across the cluster
@@ -62,25 +78,24 @@ func ParseProviderID(providerID string) (int64, error) {
 }
 
 // GetInstanceState extracts the state from an instance display name
-// Display names are formatted as: "<original-name>-<state>-<cluster-name>"
+// Format: "<instance-id>-<state>-<cluster-id>"
+// Returns: "capc-available", "capc-provisioning", "capc-cluster-bound", or "capc-error"
 func GetInstanceState(displayName string) string {
 	parts := strings.Split(displayName, "-")
 	if len(parts) >= 2 {
-		// Look for known state values
-		for i, part := range parts {
-			if part == StateAvailable || part == StateClusterBound {
-				return part
-			}
-			// Also check for "state" pattern
-			if i > 0 && (part == "available" || part == "bound") {
-				if part == "available" {
-					return StateAvailable
-				}
-				return StateClusterBound
-			}
+		// Try parts[1] first (format: instanceID-state-cluster)
+		switch parts[1] {
+		case stateAvailable:
+			return StateAvailable
+		case stateProvisioning:
+			return StateProvisioning
+		case stateBound:
+			return StateClusterBound
+		case stateError:
+			return StateError
 		}
 	}
-	return StateAvailable // default to available if no state found
+	return StateAvailable // default
 }
 
 // MapInstanceStatusToMachineState maps Contabo instance status to ContaboMachineInstanceState
@@ -136,10 +151,69 @@ func ConvertRegionToCreateInstanceRegion(region string) *models.CreateInstanceRe
 	}
 }
 
-// BuildInstanceDisplayName constructs a display name for an instance based on state and cluster
-func BuildInstanceDisplayName(baseName, state, clusterName string) string {
-	if state == StateClusterBound && clusterName != "" {
-		return fmt.Sprintf("%s-%s-%s", baseName, state, clusterName)
+// BuildInstanceDisplayName creates a descriptive display name for a Contabo instance
+// Format: "<cluster-name>-<short-cluster-id>-<machine-name>" (shortened for space)
+func BuildInstanceDisplayName(cluster *infrastructurev1beta1.ContaboCluster, machineName string) string {
+	clusterUUID := GetClusterUUID(cluster)
+	shortID := BuildShortClusterID(clusterUUID)
+	return fmt.Sprintf("%s-%s-%s", cluster.Name, shortID, machineName)
+}
+
+// BuildInstanceDisplayNameWithState creates a display name including instance state
+// Format: "<instance-id>-<state>-<cluster-id>" (shortened for space)
+func BuildInstanceDisplayNameWithState(instanceID int64, state, clusterID string) string {
+	if state != "" && clusterID != "" {
+		return fmt.Sprintf("%d-%s-%s", instanceID, state, clusterID)
+	} else if state != "" {
+		return fmt.Sprintf("%d-%s", instanceID, state)
 	}
-	return fmt.Sprintf("%s-%s", baseName, state)
+	return fmt.Sprintf("%d", instanceID)
+}
+
+// GetClusterNameFromDisplayName extracts cluster name from display name
+// Returns empty string if not in provisioning or bound state
+// GetClusterIDFromDisplayName extracts cluster ID from display name
+// Returns empty string if not in provisioning or bound state
+// Expects format: "<instance-id>-<state>-<cluster-id>"
+func GetClusterIDFromDisplayName(displayName string) string {
+	parts := strings.Split(displayName, "-")
+	if len(parts) >= 3 && (parts[1] == stateProvisioning || parts[1] == stateBound) {
+		return strings.Join(parts[2:], "-")
+	}
+	return ""
+}
+
+// EnsureClusterUUID ensures the cluster has a unique UUID label
+// If the cluster doesn't have a UUID label, generates a new UUID v4 and returns it
+// If it already has one, returns the existing UUID
+func EnsureClusterUUID(cluster *infrastructurev1beta1.ContaboCluster) string {
+	if cluster.Labels == nil {
+		cluster.Labels = make(map[string]string)
+	}
+
+	if existingUUID, exists := cluster.Labels[ClusterUUIDLabel]; exists && existingUUID != "" {
+		return existingUUID
+	}
+
+	// Generate new UUID v4
+	newUUID := uuid.New().String()
+	cluster.Labels[ClusterUUIDLabel] = newUUID
+	return newUUID
+}
+
+// GetClusterUUID retrieves the cluster UUID from labels
+// Returns empty string if no UUID is set
+func GetClusterUUID(cluster *infrastructurev1beta1.ContaboCluster) string {
+	if cluster.Labels == nil {
+		return ""
+	}
+	return cluster.Labels[ClusterUUIDLabel]
+}
+
+// BuildShortClusterID generates a short identifier from cluster UUID
+func BuildShortClusterID(clusterUUID string) string {
+	if len(clusterUUID) >= 4 {
+		return clusterUUID[:4]
+	}
+	return clusterUUID
 }

@@ -123,6 +123,10 @@ func (r *ContaboClusterReconciler) reconcileNormal(ctx context.Context, contaboC
 		contaboCluster.Status.Conditions = []clusterv1.Condition{}
 	}
 
+	// Ensure cluster has a unique UUID for global identification
+	clusterUUID := EnsureClusterUUID(contaboCluster)
+	log.Info("Cluster UUID ensured", "uuid", clusterUUID)
+
 	// Set the cluster in a progressing state
 	conditions.MarkFalse(contaboCluster, infrastructurev1beta1.ReadyCondition, infrastructurev1beta1.CreatingReason, clusterv1.ConditionSeverityInfo, "")
 

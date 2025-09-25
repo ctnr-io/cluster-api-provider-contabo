@@ -128,7 +128,9 @@ func main() {
 	// Validate OAuth2 credentials
 	if contaboClientID == "" || contaboClientSecret == "" || contaboAPIUser == "" || contaboAPIPassword == "" {
 		setupLog.Error(fmt.Errorf("contabo OAuth2 credentials are required"),
-			"set via flags or environment variables: CONTABO_CLIENT_ID, CONTABO_CLIENT_SECRET, CONTABO_API_USER, CONTABO_API_PASSWORD")
+			"set via flags or environment variables",
+			"CONTABO_CLIENT_ID", "CONTABO_CLIENT_SECRET",
+			"CONTABO_API_USER", "CONTABO_API_PASSWORD")
 		os.Exit(1)
 	}
 

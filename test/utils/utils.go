@@ -275,14 +275,20 @@ spec:
 		return fmt.Errorf("failed to create temp file for CoreProvider: %w", err)
 	}
 	defer func() {
-		tempFile.Close()
-		os.Remove(tempFile.Name())
+		if closeErr := tempFile.Close(); closeErr != nil {
+			fmt.Printf("Warning: failed to close temp file: %v\n", closeErr)
+		}
+		if removeErr := os.Remove(tempFile.Name()); removeErr != nil {
+			fmt.Printf("Warning: failed to remove temp file: %v\n", removeErr)
+		}
 	}()
 
 	if _, err := tempFile.WriteString(coreProviderYAML); err != nil {
 		return fmt.Errorf("failed to write CoreProvider YAML: %w", err)
 	}
-	tempFile.Close()
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
 
 	cmd := exec.Command("kubectl", "apply", "-f", tempFile.Name())
 	if _, err := Run(cmd); err != nil {
@@ -305,7 +311,8 @@ spec:
 // UninstallCAPIOperator uninstalls the CAPI operator and related components.
 func UninstallCAPIOperator() {
 	// Check if CoreProvider exists first
-	cmd := exec.Command("kubectl", "get", "coreprovider", "cluster-api", "-n", "capi-operator-system", "--ignore-not-found")
+	cmd := exec.Command("kubectl", "get", "coreprovider", "cluster-api",
+		"-n", "capi-operator-system", "--ignore-not-found")
 	if output, err := Run(cmd); err == nil && output != "" {
 		fmt.Printf("Found CoreProvider, attempting deletion...\n")
 
@@ -339,7 +346,8 @@ func UninstallCAPIOperator() {
 
 	// Wait for operator pods to be fully terminated
 	cmd = exec.Command("kubectl", "wait", "--for=delete", "pods",
-		"-n", "capi-operator-system", "-l", "app.kubernetes.io/name=cluster-api-operator", "--timeout=60s", "--ignore-not-found")
+		"-n", "capi-operator-system", "-l", "app.kubernetes.io/name=cluster-api-operator",
+		"--timeout=60s", "--ignore-not-found")
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
