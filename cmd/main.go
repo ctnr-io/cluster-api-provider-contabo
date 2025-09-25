@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"github.com/google/uuid"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -59,8 +61,6 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
-
-
 // nolint:gocyclo
 func main() {
 	var metricsAddr string
@@ -74,6 +74,7 @@ func main() {
 	var contaboClientSecret string
 	var contaboAPIUser string
 	var contaboAPIPassword string
+	var leaderElectionID string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -100,6 +101,8 @@ func main() {
 		"The Contabo API username. Can also be set via CONTABO_API_USER environment variable.")
 	flag.StringVar(&contaboAPIPassword, "contabo-api-password", "",
 		"The Contabo API password. Can also be set via CONTABO_API_PASSWORD environment variable.")
+	flag.StringVar(&leaderElectionID, "leader-election-id", "",
+		"Leader election ID. If not specified, a dynamic ID will be generated based on namespace and controller name.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -223,13 +226,19 @@ func main() {
 		metricsServerOptions.KeyName = metricsCertKey
 	}
 
+	// Generate dynamic leader election ID if not provided
+	leaderElectionNamespace := getLeaderElectionNamespace()
+	finalLeaderElectionID := generateLeaderElectionID(leaderElectionID, leaderElectionNamespace)
+	setupLog.Info("Using leader election ID", "leaderElectionID", finalLeaderElectionID)
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
-		Metrics:                metricsServerOptions,
-		WebhookServer:          webhookServer,
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "8e238d33.cluster.x-k8s.io",
+		Scheme:                  scheme,
+		Metrics:                 metricsServerOptions,
+		WebhookServer:           webhookServer,
+		HealthProbeBindAddress:  probeAddr,
+		LeaderElection:          enableLeaderElection,
+		LeaderElectionID:        finalLeaderElectionID,
+		LeaderElectionNamespace: leaderElectionNamespace,
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
@@ -281,4 +290,41 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// generateLeaderElectionID creates a unique leader election ID using UUID hash
+func generateLeaderElectionID(customID string, namespace string) string {
+	// If a custom ID is provided, use it
+	if customID != "" {
+		return customID
+	}
+
+	// Generate a UUID for uniqueness
+	id := uuid.New()
+
+	// Create hash of UUID to get shorter identifier (8 chars)
+	hash := sha256.Sum256([]byte(id.String()))
+	shortID := fmt.Sprintf("%x", hash)[:8]
+
+	// Create leader election ID with optional namespace and short hash
+	if namespace != "" {
+		return fmt.Sprintf("contabo-%s-%s.cluster.x-k8s.io", namespace, shortID)
+	}
+	return fmt.Sprintf("contabo-%s.cluster.x-k8s.io", shortID)
+}
+
+// getLeaderElectionNamespace determines the namespace for leader election
+func getLeaderElectionNamespace() string {
+	// Try to get namespace from environment (set by Kubernetes deployment)
+	if namespace := os.Getenv("CONTROLLER_NAMESPACE"); namespace != "" {
+		return namespace
+	}
+
+	// Fallback: try to read from service account namespace
+	if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+		return string(data)
+	}
+
+	// Return empty string to use default namespace behavior
+	return ""
 }

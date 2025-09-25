@@ -38,14 +38,14 @@ type OAuth2TokenResponse struct {
 
 // TokenManager manages OAuth2 token lifecycle with automatic refresh
 type TokenManager struct {
-	mu            sync.RWMutex
-	clientID      string
-	clientSecret  string
-	apiUser       string
-	apiPassword   string
-	accessToken   string
-	expiresAt     time.Time
-	tokenURL      string
+	mu           sync.RWMutex
+	clientID     string
+	clientSecret string
+	apiUser      string
+	apiPassword  string
+	accessToken  string
+	expiresAt    time.Time
+	tokenURL     string
 }
 
 // NewTokenManager creates a new token manager for Contabo OAuth2 authentication
