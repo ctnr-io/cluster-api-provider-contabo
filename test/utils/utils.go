@@ -304,17 +304,71 @@ spec:
 
 // UninstallCAPIOperator uninstalls the CAPI operator and related components.
 func UninstallCAPIOperator() {
-	// Delete CoreProvider first
-	cmd := exec.Command("kubectl", "delete", "coreprovider", "cluster-api",
-		"-n", "capi-operator-system", "--ignore-not-found")
+	// Check if CoreProvider exists first
+	cmd := exec.Command("kubectl", "get", "coreprovider", "cluster-api", "-n", "capi-operator-system", "--ignore-not-found")
+	if output, err := Run(cmd); err == nil && output != "" {
+		fmt.Printf("Found CoreProvider, attempting deletion...\n")
+
+		// Delete CoreProvider first with proper timeout
+		cmd = exec.Command("kubectl", "delete", "coreprovider", "cluster-api",
+			"-n", "capi-operator-system", "--ignore-not-found", "--timeout=120s")
+		if _, err := Run(cmd); err != nil {
+			warnError(err)
+			fmt.Printf("CoreProvider deletion failed, forcing finalizer removal...\n")
+			// If graceful deletion fails, force patch finalizers
+			cmd = exec.Command("kubectl", "patch", "coreprovider", "cluster-api",
+				"-n", "capi-operator-system", "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found")
+			_, _ = Run(cmd)
+		}
+	} else {
+		fmt.Printf("No CoreProvider found to delete\n")
+	}
+
+	// Wait for CoreProvider to be fully removed
+	cmd = exec.Command("kubectl", "wait", "--for=delete", "coreprovider/cluster-api",
+		"-n", "capi-operator-system", "--timeout=60s", "--ignore-not-found")
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
 
-	// Uninstall CAPI operator via Helm
-	cmd = exec.Command("helm", "uninstall", "capi-operator", "-n", "capi-operator-system")
+	// Uninstall CAPI operator via Helm with timeout
+	cmd = exec.Command("helm", "uninstall", "capi-operator", "-n", "capi-operator-system", "--timeout=5m")
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
+	}
+
+	// Wait for operator pods to be fully terminated
+	cmd = exec.Command("kubectl", "wait", "--for=delete", "pods",
+		"-n", "capi-operator-system", "-l", "app.kubernetes.io/name=cluster-api-operator", "--timeout=60s", "--ignore-not-found")
+	if _, err := Run(cmd); err != nil {
+		warnError(err)
+	}
+
+	// Clean up any remaining CAPI webhooks
+	cmd = exec.Command("kubectl", "delete", "validatingwebhookconfigurations",
+		"-l", "cluster.x-k8s.io/provider=cluster-api", "--ignore-not-found")
+	if _, err := Run(cmd); err != nil {
+		warnError(err)
+	}
+
+	cmd = exec.Command("kubectl", "delete", "mutatingwebhookconfigurations",
+		"-l", "cluster.x-k8s.io/provider=cluster-api", "--ignore-not-found")
+	if _, err := Run(cmd); err != nil {
+		warnError(err)
+	}
+
+	// Delete the namespace if it exists and is empty
+	cmd = exec.Command("kubectl", "delete", "namespace", "capi-operator-system", "--ignore-not-found", "--timeout=120s")
+	if _, err := Run(cmd); err != nil {
+		warnError(err)
+		fmt.Printf("Failed to delete capi-operator-system namespace: %v\n", err)
+	}
+
+	// Also try to delete the capi-system namespace if it exists
+	cmd = exec.Command("kubectl", "delete", "namespace", "capi-system", "--ignore-not-found", "--timeout=120s")
+	if _, err := Run(cmd); err != nil {
+		warnError(err)
+		fmt.Printf("Failed to delete capi-system namespace: %v\n", err)
 	}
 
 	// Remove Helm repo
@@ -322,4 +376,6 @@ func UninstallCAPIOperator() {
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
+
+	fmt.Printf("CAPI Operator uninstall completed\n")
 }

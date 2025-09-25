@@ -1043,7 +1043,7 @@ spec:
         command:
         - /manager
         image: controller:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         livenessProbe:
           httpGet:
             path: /healthz

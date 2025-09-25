@@ -74,8 +74,13 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 	if cluster == nil {
-		log.Info("Cluster Controller has not yet set OwnerRef")
-		return ctrl.Result{}, nil
+		log.Info("Cluster Controller has not yet set OwnerRef, requeuing",
+			"contaboCluster", contaboCluster.Name,
+			"namespace", contaboCluster.Namespace,
+			"ownerReferences", contaboCluster.OwnerReferences)
+
+		// Requeue after 10 seconds to allow Cluster controller to set OwnerRef
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	if annotations.IsPaused(cluster, contaboCluster) {
@@ -113,8 +118,18 @@ func (r *ContaboClusterReconciler) reconcileNormal(ctx context.Context, contaboC
 	// If the ContaboCluster doesn't have our finalizer, add it.
 	controllerutil.AddFinalizer(contaboCluster, infrastructurev1beta1.ClusterFinalizer)
 
+	// Always ensure status is initialized
+	if contaboCluster.Status.Conditions == nil {
+		contaboCluster.Status.Conditions = []clusterv1.Condition{}
+	}
+
 	// Set the cluster in a progressing state
 	conditions.MarkFalse(contaboCluster, infrastructurev1beta1.ReadyCondition, infrastructurev1beta1.CreatingReason, clusterv1.ConditionSeverityInfo, "")
+
+	log.Info("Starting ContaboCluster reconciliation",
+		"cluster", contaboCluster.Name,
+		"namespace", contaboCluster.Namespace,
+		"region", contaboCluster.Spec.Region)
 
 	// Reconcile network infrastructure
 	if err := r.reconcileNetwork(ctx, contaboCluster); err != nil {

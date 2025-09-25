@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -85,8 +86,13 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 	if machine == nil {
-		log.Info("Machine Controller has not yet set OwnerRef")
-		return ctrl.Result{}, nil
+		log.Info("Machine Controller has not yet set OwnerRef, requeuing",
+			"contaboMachine", contaboMachine.Name,
+			"namespace", contaboMachine.Namespace,
+			"ownerReferences", contaboMachine.OwnerReferences)
+
+		// Requeue after 10 seconds to allow Machine controller to set OwnerRef
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	log = log.WithValues("machine", machine.Name)
@@ -140,6 +146,17 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 //nolint:unparam // reconcileNormal may return different ctrl.Result values in future implementations
 func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta1.ContaboMachine, contaboCluster *infrastructurev1beta1.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
+
+	// Automatically add cluster label to ContaboMachine for proper mapping
+	if contaboMachine.Labels == nil {
+		contaboMachine.Labels = make(map[string]string)
+	}
+	if machine.Spec.ClusterName != "" {
+		contaboMachine.Labels[clusterv1.ClusterNameLabel] = machine.Spec.ClusterName
+		log.V(4).Info("Added cluster label to ContaboMachine",
+			"clusterName", machine.Spec.ClusterName,
+			"label", clusterv1.ClusterNameLabel)
+	}
 
 	// If the ContaboMachine doesn't have our finalizer, add it.
 	controllerutil.AddFinalizer(contaboMachine, infrastructurev1beta1.MachineFinalizer)
@@ -512,11 +529,12 @@ func (r *ContaboMachineReconciler) ContaboClusterToContaboMachines(ctx context.C
 		return result
 	}
 
-	clusterName, ok := cluster.Labels[clusterv1.ClusterNameLabel]
-	if !ok {
-		log.Info("ContaboCluster does not have cluster label")
-		return result
-	}
+	// clusterName, ok := cluster.Labels[clusterv1.ClusterNameLabel]
+	// if !ok {
+	// 	log.Info("ContaboCluster does not have cluster label")
+	// 	return result
+	// }
+	clusterName := cluster.Name
 
 	machineList := &clusterv1.MachineList{}
 	if err := r.List(ctx, machineList, client.InNamespace(cluster.Namespace), client.MatchingLabels{clusterv1.ClusterNameLabel: clusterName}); err != nil {

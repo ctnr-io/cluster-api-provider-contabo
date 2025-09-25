@@ -90,6 +90,15 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
 	$(MAKE) cleanup-test-e2e
 
+.PHONY: dev-deploy
+dev-deploy: docker-build-kind ## Build image, load to kind, and deploy for development.
+	$(MAKE) deploy IMG=${IMG}
+
+.PHONY: dev-redeploy
+dev-redeploy: docker-build-kind ## Rebuild image, load to kind, and redeploy for development.
+	$(MAKE) undeploy || true
+	$(MAKE) deploy IMG=${IMG}
+
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
@@ -122,6 +131,16 @@ run: manifests generate fmt vet ## Run a controller from your host.
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
+
+.PHONY: docker-build-kind
+docker-build-kind: ## Build docker image and load it into kind cluster.
+	$(CONTAINER_TOOL) build -t ${IMG} .
+	@if $(KIND) get clusters | grep -q $(KIND_CLUSTER); then \
+		echo "Loading image ${IMG} into kind cluster $(KIND_CLUSTER)..."; \
+		$(KIND) load docker-image ${IMG} --name $(KIND_CLUSTER); \
+	else \
+		echo "Kind cluster $(KIND_CLUSTER) not found, skipping image load"; \
+	fi
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.

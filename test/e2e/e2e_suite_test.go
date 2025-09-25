@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -56,16 +57,10 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	By("building the manager(Operator) image")
-	cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
+	By("building the manager(Operator) image and loading into Kind")
+	cmd := exec.Command("make", "docker-build-kind", fmt.Sprintf("IMG=%s", projectImage))
 	_, err := utils.Run(cmd)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager(Operator) image")
-
-	// TODO(user): If you want to change the e2e test vendor from Kind, ensure the image is
-	// built and available before running the tests. Also, remove the following block.
-	By("loading the manager(Operator) image on Kind")
-	err = utils.LoadImageToKindClusterWithName(projectImage)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager(Operator) image into Kind")
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build and load the manager(Operator) image")
 
 	// The tests-e2e are intended to run on a temporary cluster that is created and destroyed for testing.
 	// To prevent errors when tests run in environments with CertManager already installed,
@@ -94,7 +89,53 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
-	// Uninstall CAPI operator and components first
+	// Clean up any remaining Cluster API resources before uninstalling operators
+	_, _ = fmt.Fprintf(GinkgoWriter, "Cleaning up remaining Cluster API resources...\n")
+	
+	// Delete all Cluster resources across all namespaces
+	cmd := exec.Command("kubectl", "delete", "clusters", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=120s")
+	_, _ = utils.Run(cmd)
+	
+	// Delete all ContaboCluster resources across all namespaces
+	cmd = exec.Command("kubectl", "delete", "contaboclusters", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=120s")
+	_, _ = utils.Run(cmd)
+	
+	// Delete any Machine and MachineSet resources that might exist
+	cmd = exec.Command("kubectl", "delete", "machines", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=60s")
+	_, _ = utils.Run(cmd)
+	
+	cmd = exec.Command("kubectl", "delete", "machinesets", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=60s")
+	_, _ = utils.Run(cmd)
+	
+	// Wait a bit for finalizers to be processed
+	time.Sleep(10 * time.Second)
+	
+	// Force delete any remaining resources if they're stuck
+	cmd = exec.Command("kubectl", "patch", "clusters", "--all", "--all-namespaces", "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
+	_, _ = utils.Run(cmd)
+	
+	cmd = exec.Command("kubectl", "patch", "contaboclusters", "--all", "--all-namespaces", "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
+	_, _ = utils.Run(cmd)
+	
+	cmd = exec.Command("kubectl", "patch", "machines", "--all", "--all-namespaces", "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
+	_, _ = utils.Run(cmd)
+	
+	cmd = exec.Command("kubectl", "patch", "machinesets", "--all", "--all-namespaces", "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
+	_, _ = utils.Run(cmd)
+
+	// Debug: List remaining CAPI resources before deletion
+	_, _ = fmt.Fprintf(GinkgoWriter, "Checking remaining CAPI resources...\n")
+	cmd = exec.Command("kubectl", "get", "coreproviders", "--all-namespaces", "--ignore-not-found")
+	if output, err := utils.Run(cmd); err == nil && output != "" {
+		_, _ = fmt.Fprintf(GinkgoWriter, "Remaining CoreProviders:\n%s\n", output)
+	}
+	
+	cmd = exec.Command("kubectl", "get", "validatingwebhookconfigurations", "-o", "name")
+	if output, err := utils.Run(cmd); err == nil {
+		_, _ = fmt.Fprintf(GinkgoWriter, "Webhook configurations:\n%s\n", output)
+	}
+
+	// Uninstall CAPI operator and components after resources are cleaned up
 	_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CAPI operator...\n")
 	utils.UninstallCAPIOperator()
 

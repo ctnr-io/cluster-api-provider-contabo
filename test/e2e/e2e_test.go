@@ -265,19 +265,53 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks
+	})
+
+	Describe("Cluster Lifecycle", Ordered, func() {
+		var testNamespace string
+		var manifestFile string
+
+		BeforeEach(func() {
+			testNamespace = "contabo-cluster-e2e-test"
+		})
+
+		AfterEach(func() {
+			By("cleaning up cluster resources gracefully")
+
+			if manifestFile != "" {
+				// First try to delete via manifest file
+				cmd := exec.Command("kubectl", "delete", "-f", manifestFile, "--ignore-not-found=true", "--timeout=60s")
+				_, _ = utils.Run(cmd)
+				_ = os.Remove(manifestFile)
+			}
+
+			// Give some time for finalizers to be processed
+			time.Sleep(5 * time.Second)
+
+			// If resources are still stuck, try direct deletion
+			cmd := exec.Command("kubectl", "delete", "cluster", "test-cluster-e2e", "-n", testNamespace, "--ignore-not-found=true", "--timeout=30s")
+			_, _ = utils.Run(cmd)
+
+			cmd = exec.Command("kubectl", "delete", "contabocluster", "test-cluster-e2e", "-n", testNamespace, "--ignore-not-found=true", "--timeout=30s")
+			_, _ = utils.Run(cmd)
+
+			// Force remove finalizers if still stuck
+			cmd = exec.Command("kubectl", "patch", "cluster", "test-cluster-e2e", "-n", testNamespace, "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
+			_, _ = utils.Run(cmd)
+
+			cmd = exec.Command("kubectl", "patch", "contabocluster", "test-cluster-e2e", "-n", testNamespace, "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
+			_, _ = utils.Run(cmd)
+
+			// Clean up test namespace
+			cmd = exec.Command("kubectl", "delete", "namespace", testNamespace, "--ignore-not-found=true", "--timeout=120s")
+			_, _ = utils.Run(cmd)
+		})
 
 		It("should successfully reconcile ContaboCluster lifecycle", func() {
 			By("creating a test namespace for cluster resources")
-			testNamespace := "contabo-cluster-e2e-test"
 			cmd := exec.Command("kubectl", "create", "namespace", testNamespace)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create test namespace")
-
-			defer func() {
-				By("cleaning up the test namespace")
-				cmd := exec.Command("kubectl", "delete", "namespace", testNamespace, "--ignore-not-found=true", "--timeout=120s")
-				_, _ = utils.Run(cmd)
-			}()
 
 			By("applying a complete ContaboCluster with private network configuration")
 			clusterManifest := fmt.Sprintf(`
@@ -312,20 +346,13 @@ spec:
     - name: "test-e2e-private-network"
 `, testNamespace, testNamespace, testNamespace)
 
-			manifestFile := "/tmp/contabo-cluster-e2e-test.yaml"
+			manifestFile = "/tmp/contabo-cluster-e2e-test.yaml"
 			err = os.WriteFile(manifestFile, []byte(clusterManifest), 0644)
 			Expect(err).NotTo(HaveOccurred(), "Failed to write cluster manifest")
 
 			cmd = exec.Command("kubectl", "apply", "-f", manifestFile)
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to apply cluster manifest")
-
-			defer func() {
-				By("cleaning up cluster resources")
-				cmd := exec.Command("kubectl", "delete", "-f", manifestFile, "--ignore-not-found=true", "--timeout=60s")
-				_, _ = utils.Run(cmd)
-				_ = os.Remove(manifestFile)
-			}()
 
 			By("verifying the Cluster resource is created")
 			Eventually(func(g Gomega) {
@@ -345,7 +372,7 @@ spec:
 
 			By("waiting for ContaboCluster controller to process the resource")
 			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e", 
+				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e",
 					"-n", testNamespace, "-o", "jsonpath={.status}")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
@@ -366,7 +393,7 @@ spec:
 				cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace, "--tail=100")
 				logs, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
-				
+
 				// Look for cluster reconciliation activity
 				g.Expect(logs).To(Or(
 					ContainSubstring("Reconciling ContaboCluster"),
@@ -381,7 +408,7 @@ spec:
 					"-n", testNamespace, "-o", "jsonpath={.metadata.finalizers}")
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(ContainSubstring("contabocluster.infrastructure.cluster.x-k8s.io"), 
+				g.Expect(output).To(ContainSubstring("contabocluster.infrastructure.cluster.x-k8s.io"),
 					"ContaboCluster should have finalizer added")
 			}, 1*time.Minute, 5*time.Second).Should(Succeed())
 
@@ -390,7 +417,7 @@ spec:
 				cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace, "--tail=200")
 				logs, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
-				
+
 				// Look for network reconciliation
 				g.Expect(logs).To(Or(
 					ContainSubstring("reconciling private networks"),
@@ -431,7 +458,7 @@ spec:
 				cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace, "--tail=100")
 				logs, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
-				
+
 				// Look for deletion activity
 				g.Expect(logs).To(Or(
 					ContainSubstring("Reconciling ContaboCluster delete"),
@@ -449,7 +476,7 @@ spec:
 
 			By("verifying controller metrics include ContaboCluster reconciliation")
 			metricsOutput := getMetricsOutput()
-			Expect(metricsOutput).To(ContainSubstring("contabocluster"), 
+			Expect(metricsOutput).To(ContainSubstring("contabocluster"),
 				"Metrics should include ContaboCluster controller activity")
 		})
 	})
