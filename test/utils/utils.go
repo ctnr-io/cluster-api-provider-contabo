@@ -31,9 +31,6 @@ const (
 	certmanagerVersion = "v1.18.2"
 	certmanagerURLTmpl = "https://github.com/cert-manager/cert-manager/releases/download/%s/cert-manager.yaml"
 
-	clusterAPIVersion = "v1.8.5"
-	clusterAPIURLTmpl = "https://github.com/kubernetes-sigs/cluster-api/releases/download/%s/cluster-api-components.yaml"
-
 	defaultKindBinary  = "kind"
 	defaultKindCluster = "kind"
 )
@@ -134,37 +131,6 @@ func IsCertManagerCRDsInstalled() bool {
 	}
 
 	return false
-}
-
-// InstallClusterAPICRDs installs the Cluster API core CRDs bundle.
-func InstallClusterAPICRDs() error {
-	url := fmt.Sprintf(clusterAPIURLTmpl, clusterAPIVersion)
-	cmd := exec.Command("kubectl", "apply", "-f", url)
-	if _, err := Run(cmd); err != nil {
-		return fmt.Errorf("failed to install Cluster API CRDs: %w", err)
-	}
-
-	// Wait for the cluster API controller manager to be ready
-	cmd = exec.Command("kubectl", "wait", "deployment/capi-controller-manager",
-		"--for", "condition=Available",
-		"--namespace", "capi-system",
-		"--timeout", "5m",
-	)
-
-	if _, err := Run(cmd); err != nil {
-		return fmt.Errorf("failed to wait for Cluster API controller manager to be ready: %w", err)
-	}
-
-	return nil
-}
-
-// UninstallClusterAPICRDs uninstalls the Cluster API core CRDs.
-func UninstallClusterAPICRDs() {
-	url := fmt.Sprintf(clusterAPIURLTmpl, clusterAPIVersion)
-	cmd := exec.Command("kubectl", "delete", "-f", url, "--ignore-not-found")
-	if _, err := Run(cmd); err != nil {
-		warnError(err)
-	}
 }
 
 // LoadImageToKindClusterWithName loads a local docker image to the kind cluster
