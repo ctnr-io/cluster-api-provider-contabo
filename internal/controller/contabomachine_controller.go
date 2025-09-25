@@ -512,11 +512,7 @@ func (r *ContaboMachineReconciler) ContaboClusterToContaboMachines(ctx context.C
 		return result
 	}
 
-	clusterName, ok := cluster.Labels[clusterv1.ClusterNameLabel]
-	if !ok {
-		log.Info("ContaboCluster does not have cluster label")
-		return result
-	}
+	clusterName := cluster.ObjectMeta.Name
 
 	machineList := &clusterv1.MachineList{}
 	if err := r.List(ctx, machineList, client.InNamespace(cluster.Namespace), client.MatchingLabels{clusterv1.ClusterNameLabel: clusterName}); err != nil {
