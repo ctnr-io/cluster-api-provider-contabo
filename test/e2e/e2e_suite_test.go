@@ -87,7 +87,7 @@ var _ = BeforeSuite(func() {
 	// _, _ = utils.Run(cmd) // Ignore errors if nothing exists
 
 	// Initialize with latest version that supports v1beta2
-	cmd = exec.Command(clusterctlPath, "init", "--core", "cluster-api")
+	cmd = exec.Command(clusterctlPath, "init", "--core", "cluster-api", "--bootstrap", "kubeadm")
 	_, err = utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred(), "Failed to install CAPI core components")
 })
@@ -136,9 +136,9 @@ var _ = AfterSuite(func() {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Webhook configurations:\n%s\n", output)
 	}
 
-	// Teardown CertManager after the suite if not skipped and if it was not already installed
-	if !skipCertManagerInstall && !isCertManagerAlreadyInstalled {
-		_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CertManager...\n")
-		utils.UninstallCertManager()
-	}
+	// // Teardown CertManager after the suite if not skipped and if it was not already installed
+	// if !skipCertManagerInstall && !isCertManagerAlreadyInstalled {
+	// 	_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CertManager...\n")
+	// 	utils.UninstallCertManager()
+	// }
 })

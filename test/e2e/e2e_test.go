@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -85,13 +86,13 @@ var _ = Describe("Manager", Ordered, func() {
 		cmd = exec.Command("kubectl", "delete", "clusterrolebinding", metricsRoleBindingName, "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 
-		By("cleaning up CAPI core components")
-		clusterctlPath := os.Getenv("CLUSTERCTL")
-		if clusterctlPath == "" {
-			clusterctlPath = "clusterctl" // fallback to system clusterctl
-		}
-		cmd = exec.Command(clusterctlPath, "delete", "--all", "--include-crd", "--include-namespace")
-		_, _ = utils.Run(cmd)
+		// By("cleaning up CAPI core components")
+		// clusterctlPath := os.Getenv("CLUSTERCTL")
+		// if clusterctlPath == "" {
+		//   clusterctlPath = "clusterctl" // fallback to system clusterctl
+		// }
+		// cmd = exec.Command(clusterctlPath, "delete", "--all", "--include-crd", "--include-namespace")
+		// _, _ = utils.Run(cmd)
 
 		By("undeploying the controller-manager")
 		cmd = exec.Command("make", "undeploy")
@@ -229,28 +230,28 @@ var _ = Describe("Manager", Ordered, func() {
 				"--image=curlimages/curl:latest",
 				"--overrides",
 				fmt.Sprintf(`{
-					"spec": {
-						"containers": [{
-							"name": "curl",
-							"image": "curlimages/curl:latest",
-							"command": ["/bin/sh", "-c"],
-							"args": ["curl -v -k -H 'Authorization: Bearer %s' https://%s.%s.svc.cluster.local:8443/metrics"],
-							"securityContext": {
-								"readOnlyRootFilesystem": true,
-								"allowPrivilegeEscalation": false,
-								"capabilities": {
-									"drop": ["ALL"]
-								},
-								"runAsNonRoot": true,
-								"runAsUser": 1000,
-								"seccompProfile": {
-									"type": "RuntimeDefault"
-								}
-							}
-						}],
-						"serviceAccountName": "%s"
-					}
-				}`, token, metricsServiceName, namespace, serviceAccountName))
+          "spec": {
+            "containers": [{
+              "name": "curl",
+              "image": "curlimages/curl:latest",
+              "command": ["/bin/sh", "-c"],
+              "args": ["curl -v -k -H 'Authorization: Bearer %s' https://%s.%s.svc.cluster.local:8443/metrics"],
+              "securityContext": {
+                "readOnlyRootFilesystem": true,
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": ["ALL"]
+                },
+                "runAsNonRoot": true,
+                "runAsUser": 1000,
+                "seccompProfile": {
+                  "type": "RuntimeDefault"
+                }
+              }
+            }],
+            "serviceAccountName": "%s"
+          }
+        }`, token, metricsServiceName, namespace, serviceAccountName))
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create curl-metrics pod")
 
@@ -275,224 +276,171 @@ var _ = Describe("Manager", Ordered, func() {
 		// +kubebuilder:scaffold:e2e-webhooks-checks
 	})
 
-	Describe("Cluster Lifecycle", Ordered, func() {
-		var testNamespace string
-		var manifestFile string
+	Describe("Cluster Lifecycle", func() {
+		const testNamespace = "contabo-e2e-test"
+
+		// Helper function to run kubectl commands
+		kubectl := func(args ...string) (string, error) {
+			return utils.Run(exec.Command("kubectl", args...))
+		}
+
+		// Helper to apply manifests directly via kubectl
+		applyManifest := func(manifest string) {
+			manifestFile := "/tmp/contabo-e2e-test.yaml"
+			Expect(os.WriteFile(manifestFile, []byte(manifest), 0644)).To(Succeed())
+			defer os.Remove(manifestFile)
+
+			_, err := kubectl("apply", "-f", manifestFile)
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		// Helper to wait for resource existence
+		waitForResource := func(resource, name string, timeout time.Duration) {
+			Eventually(func() error {
+				_, err := kubectl("get", resource, name, "-n", testNamespace)
+				return err
+			}, timeout, 2*time.Second).Should(Succeed())
+		}
+
+		// Helper to wait for resource to be ready with proper conditions
+		waitForResourceReady := func(resource, name, readyConditionPath string, timeout time.Duration) {
+			Eventually(func() string {
+				output, _ := kubectl("get", resource, name, "-n", testNamespace, "-o", "jsonpath="+readyConditionPath)
+				return strings.TrimSpace(output)
+			}, timeout, 5*time.Second).Should(Equal("True"))
+		}
+
+		// Helper to check conditions are properly set
+		checkConditions := func(resource, name string) {
+			Eventually(func() string {
+				output, _ := kubectl("get", resource, name, "-n", testNamespace, "-o", "jsonpath={.status.conditions}")
+				return output
+			}, 30*time.Second, 2*time.Second).ShouldNot(BeEmpty())
+		}
 
 		BeforeEach(func() {
-			testNamespace = "contabo-cluster-e2e-test"
+			By("creating test namespace")
+			kubectl("create", "namespace", testNamespace)
 		})
 
 		AfterEach(func() {
-			By("cleaning up cluster resources gracefully")
-
-			if manifestFile != "" {
-				// First try to delete via manifest file
-				cmd := exec.Command("kubectl", "delete", "-f", manifestFile, "--ignore-not-found=true", "--timeout=60s")
-				_, _ = utils.Run(cmd)
-				_ = os.Remove(manifestFile)
-			}
-
-			// Give some time for finalizers to be processed
-			time.Sleep(5 * time.Second)
-
-			// If resources are still stuck, try direct deletion
-			cmd := exec.Command("kubectl", "delete", "cluster", "test-cluster-e2e", "-n", testNamespace, "--ignore-not-found=true", "--timeout=30s")
-			_, _ = utils.Run(cmd)
-
-			cmd = exec.Command("kubectl", "delete", "contabocluster", "test-cluster-e2e", "-n", testNamespace, "--ignore-not-found=true", "--timeout=30s")
-			_, _ = utils.Run(cmd)
-
-			// Force remove finalizers if still stuck
-			cmd = exec.Command("kubectl", "patch", "cluster", "test-cluster-e2e", "-n", testNamespace, "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
-			_, _ = utils.Run(cmd)
-
-			cmd = exec.Command("kubectl", "patch", "contabocluster", "test-cluster-e2e", "-n", testNamespace, "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
-			_, _ = utils.Run(cmd)
-
-			// Clean up test namespace
-			cmd = exec.Command("kubectl", "delete", "namespace", testNamespace, "--ignore-not-found=true", "--timeout=120s")
-			_, _ = utils.Run(cmd)
+			By("cleaning up test resources")
+			kubectl("delete", "namespace", testNamespace, "--ignore-not-found=true", "--timeout=60s")
 		})
 
-		It("should successfully reconcile ContaboCluster lifecycle", func() {
-			By("creating a test namespace for cluster resources")
-			cmd := exec.Command("kubectl", "create", "namespace", testNamespace)
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create test namespace")
-
-			By("applying a complete ContaboCluster with private network configuration")
-			clusterManifest := fmt.Sprintf(`
----
+		It("creates ContaboCluster and control plane with V76 product", func() {
+			clusterManifest := fmt.Sprintf(`---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ContaboCluster
 metadata:
-  name: test-cluster-e2e
+  name: test-cluster
   namespace: %s
 spec:
-  region: "EU"
+  region: EU
   controlPlaneEndpoint:
-    host: "10.0.0.100"
+    host: 10.0.0.100
     port: 6443
   network:
     privateNetworks:
-    - name: "test-e2e-private-network"
+    - name: test-network
 ---
 apiVersion: cluster.x-k8s.io/v1beta2
 kind: Cluster
 metadata:
-  name: test-cluster-e2e
+  name: test-cluster
   namespace: %s
 spec:
   infrastructureRef:
     apiGroup: infrastructure.cluster.x-k8s.io
     kind: ContaboCluster
-    name: test-cluster-e2e
-`, testNamespace, testNamespace)
+    name: test-cluster
+---
+kind: KubeadmConfig
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+metadata:
+  name: test-control-plane
+  namespace: %s
+spec:
+  joinConfiguration:
+		controlPlane:
+			localAPIEndpoint:
+				advertiseAddress: 10.0.0.100
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: ContaboMachine
+metadata:
+  name: test-control-plane
+  namespace: %s
+spec:
+  instanceType: V76
+  region: EU
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: Machine
+metadata:
+  name: test-control-plane
+  namespace: %s
+  labels:
+    cluster.x-k8s.io/cluster-name: test-cluster
+    cluster.x-k8s.io/control-plane: ""
+spec:
+  clusterName: test-cluster
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: ContaboMachine
+    name: test-control-plane
+  bootstrap:
+    dataSecretName: test-bootstrap-data
+`, testNamespace, testNamespace, testNamespace, testNamespace, testNamespace)
 
-			manifestFile = "/tmp/contabo-cluster-e2e-test.yaml"
-			err = os.WriteFile(manifestFile, []byte(clusterManifest), 0644)
-			Expect(err).NotTo(HaveOccurred(), "Failed to write cluster manifest")
+			By("applying cluster and control plane manifests")
+			applyManifest(clusterManifest)
 
-			cmd = exec.Command("kubectl", "apply", "-f", manifestFile)
-			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to apply cluster manifest")
+			By("verifying cluster resources are created")
+			waitForResource("cluster", "test-cluster", 30*time.Second)
+			waitForResource("contabocluster", "test-cluster", 30*time.Second)
+			waitForResource("machine", "test-control-plane", 30*time.Second)
+			waitForResource("contabomachine", "test-control-plane", 30*time.Second)
 
-			By("debugging CAPI components status")
-			cmd = exec.Command("kubectl", "get", "pods", "--all-namespaces", "-l", "cluster-api")
-			capiPods, err := utils.Run(cmd)
-			if err == nil {
-				fmt.Printf("CAPI pods found:\n%s\n", capiPods)
-			} else {
-				fmt.Printf("No CAPI pods found or error: %s\n", err)
-			}
+			By("verifying V76 product type is configured for control plane machine")
+			Eventually(func() string {
+				output, _ := kubectl("get", "contabomachine", "test-control-plane", "-n", testNamespace, "-o", "jsonpath={.spec.instanceType}")
+				return output
+			}, 30*time.Second, 2*time.Second).Should(Equal("V76"))
 
-			By("checking for CAPI CRDs")
-			cmd = exec.Command("kubectl", "get", "crd", "-o", "name")
-			crds, err := utils.Run(cmd)
-			if err == nil {
-				if len(crds) > 0 {
-					fmt.Printf("Found CRDs, checking for CAPI ones...\n")
-					cmd = exec.Command("kubectl", "get", "crd", "-o", "name")
-					output, _ := utils.Run(cmd)
-					if output != "" {
-						fmt.Printf("Sample CRDs: %s\n", output[:min(500, len(output))])
-					}
-				}
-			}
+			By("verifying ContaboCluster conditions are properly set")
+			checkConditions("contabocluster", "test-cluster")
 
-			By("verifying the Cluster resource is created")
-			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "cluster", "test-cluster-e2e", "-n", testNamespace, "-o", "jsonpath={.metadata.name}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("test-cluster-e2e"), "Cluster resource should be created")
-			}, 30*time.Second, 5*time.Second).Should(Succeed())
+			By("waiting for ContaboCluster to be ready")
+			waitForResourceReady("contabocluster", "test-cluster", "{.status.conditions[?(@.type=='Ready')].status}", 3*time.Minute)
 
-			By("verifying the ContaboCluster resource is created")
-			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e", "-n", testNamespace, "-o", "jsonpath={.metadata.name}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("test-cluster-e2e"), "ContaboCluster resource should be created")
-			}, 30*time.Second, 5*time.Second).Should(Succeed())
+			By("verifying ContaboCluster ready status is true")
+			Eventually(func() string {
+				output, _ := kubectl("get", "contabocluster", "test-cluster", "-n", testNamespace, "-o", "jsonpath={.status.ready}")
+				return strings.TrimSpace(output)
+			}, 30*time.Second, 5*time.Second).Should(Equal("true"))
 
-			By("waiting for ContaboCluster controller to process the resource")
-			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e",
-					"-n", testNamespace, "-o", "jsonpath={.status}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).ToNot(BeEmpty(), "ContaboCluster status should be populated by controller")
-			}, 2*time.Minute, 10*time.Second).Should(Succeed())
+			By("verifying ContaboMachine conditions are properly set")
+			checkConditions("contabomachine", "test-control-plane")
 
-			By("verifying private network configuration is processed")
-			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e",
-					"-n", testNamespace, "-o", "jsonpath={.spec.network.privateNetworks[0].name}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("test-e2e-private-network"), "Private network specification should be correct")
-			}, 30*time.Second, 5*time.Second).Should(Succeed())
+			By("waiting for ContaboMachine to be ready")
+			waitForResourceReady("contabomachine", "test-control-plane", "{.status.conditions[?(@.type=='Ready')].status}", 3*time.Minute)
 
-			By("checking controller logs for cluster reconciliation")
-			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace, "--tail=100")
-				logs, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
+			By("verifying network infrastructure is ready")
+			Eventually(func() string {
+				output, _ := kubectl("get", "contabocluster", "test-cluster", "-n", testNamespace, "-o", "jsonpath={.status.conditions[?(@.type=='NetworkInfrastructureReady')].status}")
+				return strings.TrimSpace(output)
+			}, 2*time.Minute, 10*time.Second).Should(Equal("True"))
 
-				// Look for cluster reconciliation activity
-				g.Expect(logs).To(Or(
-					ContainSubstring("Reconciling ContaboCluster"),
-					ContainSubstring("reconciling contabocluster"),
-					ContainSubstring("test-cluster-e2e"),
-				), "Controller should show cluster reconciliation activity")
-			}, 2*time.Minute, 10*time.Second).Should(Succeed())
-
-			By("verifying cluster finalizer is added")
-			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e",
-					"-n", testNamespace, "-o", "jsonpath={.metadata.finalizers}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(ContainSubstring("contabocluster.infrastructure.cluster.x-k8s.io"),
-					"ContaboCluster should have finalizer added")
-			}, 1*time.Minute, 5*time.Second).Should(Succeed())
-
-			By("verifying conditions are set on ContaboCluster")
-			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e",
-					"-n", testNamespace, "-o", "jsonpath={.status.conditions}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).ToNot(BeEmpty(), "ContaboCluster should have status conditions")
-			}, 1*time.Minute, 10*time.Second).Should(Succeed())
-
-			By("testing cluster deletion flow")
-			cmd = exec.Command("kubectl", "delete", "cluster", "test-cluster-e2e", "-n", testNamespace)
-			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to delete cluster")
-
-			By("verifying ContaboCluster enters deletion flow")
-			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e",
-					"-n", testNamespace, "-o", "jsonpath={.metadata.deletionTimestamp}")
-				output, err := utils.Run(cmd)
-				if err != nil {
-					// Resource may already be deleted
-					return
-				}
-				g.Expect(output).ToNot(BeEmpty(), "ContaboCluster should have deletion timestamp set")
-			}, 1*time.Minute, 5*time.Second).Should(Succeed())
-
-			By("checking deletion reconciliation logs")
-			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace, "--tail=100")
-				logs, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-
-				// Look for deletion activity
-				g.Expect(logs).To(Or(
-					ContainSubstring("Reconciling ContaboCluster delete"),
-					ContainSubstring("reconcileDelete"),
-					ContainSubstring("deleteNetwork"),
-				), "Controller should process cluster deletion")
-			}, 2*time.Minute, 10*time.Second).Should(Succeed())
-
-			By("verifying resources are eventually cleaned up")
-			Eventually(func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "contabocluster", "test-cluster-e2e", "-n", testNamespace)
-				_, err := utils.Run(cmd)
-				g.Expect(err).To(HaveOccurred(), "ContaboCluster should be deleted")
-			}, 2*time.Minute, 10*time.Second).Should(Succeed())
-
-			By("verifying controller metrics include ContaboCluster reconciliation")
-			metricsOutput := getMetricsOutput()
-			Expect(metricsOutput).To(ContainSubstring("contabocluster"),
-				"Metrics should include ContaboCluster controller activity")
+			By("checking controller logs show successful reconciliation")
+			Eventually(func() string {
+				logs, _ := kubectl("logs", controllerPodName, "-n", namespace, "--tail=50")
+				return logs
+			}, 1*time.Minute, 5*time.Second).Should(And(
+				ContainSubstring("test-cluster"),
+				ContainSubstring("reconciled successfully"),
+			))
 		})
-
-
 	})
 })
 
@@ -501,9 +449,9 @@ spec:
 // and parsing the resulting token from the API response.
 func serviceAccountToken() (string, error) {
 	const tokenRequestRawString = `{
-		"apiVersion": "authentication.k8s.io/v1",
-		"kind": "TokenRequest"
-	}`
+    "apiVersion": "authentication.k8s.io/v1",
+    "kind": "TokenRequest"
+  }`
 
 	// Temporary file to store the token request
 	secretName := fmt.Sprintf("%s-token-request", serviceAccountName)

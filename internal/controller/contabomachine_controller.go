@@ -245,6 +245,7 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
 		Type:   infrastructurev1beta2.InstanceReadyCondition,
 		Status: metav1.ConditionTrue,
+		Reason: infrastructurev1beta2.InstanceAvailableReason,
 	})
 
 	return ctrl.Result{}, nil
