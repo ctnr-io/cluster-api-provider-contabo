@@ -75,50 +75,62 @@ var _ = BeforeSuite(func() {
 			_, _ = fmt.Fprintf(GinkgoWriter, "WARNING: CertManager is already installed. Skipping installation...\n")
 		}
 	}
+
+	By("installing Cluster API core components")
+	clusterctlPath := os.Getenv("CLUSTERCTL")
+	if clusterctlPath == "" {
+		clusterctlPath = "clusterctl" // fallback to system clusterctl
+	}
+
+	// // Clean up any existing CAPI installations first
+	// cmd = exec.Command(clusterctlPath, "delete", "--all", "--include-crd", "--include-namespace")
+	// _, _ = utils.Run(cmd) // Ignore errors if nothing exists
+
+	// Initialize with latest version that supports v1beta2
+	cmd = exec.Command(clusterctlPath, "init", "--core", "cluster-api")
+	_, err = utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Failed to install CAPI core components")
 })
 
 var _ = AfterSuite(func() {
 	// Clean up any remaining Cluster API resources before uninstalling operators
 	_, _ = fmt.Fprintf(GinkgoWriter, "Cleaning up remaining Cluster API resources...\n")
-	
+
 	// Delete all Cluster resources across all namespaces
 	cmd := exec.Command("kubectl", "delete", "clusters", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=120s")
 	_, _ = utils.Run(cmd)
-	
+
 	// Delete all ContaboCluster resources across all namespaces
 	cmd = exec.Command("kubectl", "delete", "contaboclusters", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=120s")
 	_, _ = utils.Run(cmd)
-	
+
 	// Delete any Machine and MachineSet resources that might exist
 	cmd = exec.Command("kubectl", "delete", "machines", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=60s")
 	_, _ = utils.Run(cmd)
-	
+
 	cmd = exec.Command("kubectl", "delete", "machinesets", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=60s")
 	_, _ = utils.Run(cmd)
-	
+
 	// Wait a bit for finalizers to be processed
 	time.Sleep(10 * time.Second)
-	
+
 	// Force delete any remaining resources if they're stuck
 	cmd = exec.Command("kubectl", "patch", "clusters", "--all", "--all-namespaces", "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
 	_, _ = utils.Run(cmd)
-	
+
 	cmd = exec.Command("kubectl", "patch", "contaboclusters", "--all", "--all-namespaces", "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
 	_, _ = utils.Run(cmd)
-	
+
 	cmd = exec.Command("kubectl", "patch", "machines", "--all", "--all-namespaces", "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
 	_, _ = utils.Run(cmd)
-	
+
 	cmd = exec.Command("kubectl", "patch", "machinesets", "--all", "--all-namespaces", "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
 	_, _ = utils.Run(cmd)
 
-	// Debug: List remaining CAPI resources before deletion
-	_, _ = fmt.Fprintf(GinkgoWriter, "Checking remaining CAPI resources...\n")
-	cmd = exec.Command("kubectl", "get", "coreproviders", "--all-namespaces", "--ignore-not-found")
-	if output, err := utils.Run(cmd); err == nil && output != "" {
-		_, _ = fmt.Fprintf(GinkgoWriter, "Remaining CoreProviders:\n%s\n", output)
-	}
-	
+	// Remove clusterctl artifacts if any
+	cmd = exec.Command("clusterctl", "delete", "--all", "--include-crd", "--include-namespace", "--ignore-not-found=true")
+	_, _ = utils.Run(cmd)
+
 	cmd = exec.Command("kubectl", "get", "validatingwebhookconfigurations", "-o", "name")
 	if output, err := utils.Run(cmd); err == nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Webhook configurations:\n%s\n", output)

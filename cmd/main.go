@@ -153,6 +153,7 @@ func main() {
 				return fmt.Errorf("failed to get access token: %w", err)
 			}
 			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("x-request-id", uuid.New().String())
 			return nil
 		}),
 	)

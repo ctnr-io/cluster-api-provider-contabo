@@ -55,6 +55,9 @@ const (
 
 	// WaitingForControlPlaneEndpointReason indicates that the cluster is waiting for the control plane endpoint to be set.
 	WaitingForControlPlaneEndpointReason = "WaitingForControlPlaneEndpoint"
+
+	// AvailableReason indicates that the cluster infrastructure is ready and available.
+	AvailableReason = clusterv1.AvailableReason
 )
 
 // Condition types and reasons for ContaboMachine.
@@ -85,4 +88,7 @@ const (
 
 	// WaitingForBootstrapDataReason indicates that the machine is waiting for bootstrap data to be ready.
 	WaitingForBootstrapDataReason = "WaitingForBootstrapData"
+
+	// InstanceReadyReason indicates that the instance is ready.
+	InstanceAvailableReason = clusterv1.AvailableReason
 )

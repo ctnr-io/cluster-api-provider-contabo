@@ -85,6 +85,11 @@ make dev-redeploy    # Rebuild and redeploy (includes undeploy)
 - Provider ID format: `contabo://<instance-id>`
 - Finalizers: `contabocluster.infrastructure.cluster.x-k8s.io`, `contabomachine.infrastructure.cluster.x-k8s.io`
 
+### API Version Compatibility
+- **ContaboCluster/ContaboMachine**: v1beta2 (this provider)
+- **Core CAPI resources**: May use v1beta1 or v1beta2 depending on clusterctl version
+- **E2E tests**: Use `Cluster` v1beta1 with `ContaboCluster` v1beta2 for compatibility
+
 ## Integration Points
 
 ### Contabo API
@@ -114,3 +119,4 @@ Run `test/setup-e2e.sh` to validate credentials before running `make test-e2e`
 - **API client issues**: Regenerate client with `make generate-api-client` after OpenAPI changes
 - **Authentication failures**: Verify all 4 environment variables are set correctly
 - **Instance not found**: Check instance display name format and state management in helpers
+- **clusterctl version mismatch**: If e2e tests fail with "v1beta2 management clusters, v1beta1 detected", clean existing CAPI installation first with `clusterctl delete --all --include-crd --include-namespace` before running tests

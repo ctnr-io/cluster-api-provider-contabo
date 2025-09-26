@@ -431,7 +431,7 @@ func (r *ContaboMachineReconciler) findAvailableInstance(ctx context.Context, co
 	log.Info("Searching for available instances in region", "region", contaboMachine.Spec.Region, "productType", contaboMachine.Spec.InstanceType)
 
 	// Iterate through all pages to find available instances
-	page := int64(1)
+	page := int64(0)
 	pageSize := int64(100) // Use a reasonable page size
 
 	for {
