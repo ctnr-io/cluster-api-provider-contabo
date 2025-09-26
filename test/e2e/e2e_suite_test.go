@@ -65,7 +65,6 @@ var _ = BeforeSuite(func() {
 	// The tests-e2e are intended to run on a temporary cluster that is created and destroyed for testing.
 	// To prevent errors when tests run in environments with CertManager already installed,
 	// we check for its presence before execution.
-	// Setup CertManager FIRST (CAPI operator needs it)
 	if !skipCertManagerInstall {
 		By("checking if cert manager is installed already")
 		isCertManagerAlreadyInstalled = utils.IsCertManagerCRDsInstalled()
@@ -76,16 +75,6 @@ var _ = BeforeSuite(func() {
 			_, _ = fmt.Fprintf(GinkgoWriter, "WARNING: CertManager is already installed. Skipping installation...\n")
 		}
 	}
-
-	// Install CAPI operator (after cert-manager)
-	By("installing CAPI operator via Helm")
-	err = utils.InstallCAPIOperator()
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install CAPI operator")
-
-	// Install Cluster API core components (after CAPI operator is ready)
-	By("installing Cluster API core components")
-	err = utils.InstallClusterAPICRDs()
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install Cluster API core components")
 })
 
 var _ = AfterSuite(func() {
@@ -134,10 +123,6 @@ var _ = AfterSuite(func() {
 	if output, err := utils.Run(cmd); err == nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Webhook configurations:\n%s\n", output)
 	}
-
-	// Uninstall CAPI operator and components after resources are cleaned up
-	_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CAPI operator...\n")
-	utils.UninstallCAPIOperator()
 
 	// Teardown CertManager after the suite if not skipped and if it was not already installed
 	if !skipCertManagerInstall && !isCertManagerAlreadyInstalled {

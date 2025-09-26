@@ -33,12 +33,13 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
-	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -50,7 +51,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	infrastructurev1beta1 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta1"
+	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
 	contaboclient "github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/client"
 	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/models"
 )
@@ -76,7 +77,7 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	log := logf.FromContext(ctx)
 
 	// Fetch the ContaboMachine instance
-	contaboMachine := &infrastructurev1beta1.ContaboMachine{}
+	contaboMachine := &infrastructurev1beta2.ContaboMachine{}
 	if err := r.Get(ctx, req.NamespacedName, contaboMachine); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -112,7 +113,7 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	log = log.WithValues("cluster", cluster.Name)
 
-	contaboCluster := &infrastructurev1beta1.ContaboCluster{}
+	contaboCluster := &infrastructurev1beta2.ContaboCluster{}
 	contaboClusterName := client.ObjectKey{
 		Namespace: contaboMachine.Namespace,
 		Name:      cluster.Spec.InfrastructureRef.Name,
@@ -144,7 +145,7 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return r.reconcileNormal(ctx, machine, contaboMachine, contaboCluster)
 }
 
-func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta1.ContaboMachine, contaboCluster *infrastructurev1beta1.ContaboCluster) (ctrl.Result, error) {
+func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	// Automatically add cluster label to ContaboMachine for proper mapping
@@ -159,19 +160,32 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 	}
 
 	// If the ContaboMachine doesn't have our finalizer, add it.
-	controllerutil.AddFinalizer(contaboMachine, infrastructurev1beta1.MachineFinalizer)
+	controllerutil.AddFinalizer(contaboMachine, infrastructurev1beta2.MachineFinalizer)
+
+	// Always ensure status is initialized
+	if contaboMachine.Status.Conditions == nil {
+		contaboMachine.Status.Conditions = []metav1.Condition{}
+	}
 
 	// Check if the infrastructure is ready, otherwise return and wait for the cluster object to be updated
 	if !contaboCluster.Status.Ready {
 		log.Info("ContaboCluster is not ready yet")
-		conditions.MarkFalse(contaboMachine, infrastructurev1beta1.InstanceReadyCondition, infrastructurev1beta1.WaitingForClusterInfrastructureReason, clusterv1.ConditionSeverityInfo, "")
+		meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+			Type:   infrastructurev1beta2.InstanceReadyCondition,
+			Status: metav1.ConditionFalse,
+			Reason: infrastructurev1beta2.WaitingForClusterInfrastructureReason,
+		})
 		return ctrl.Result{}, nil
 	}
 
 	// Make sure bootstrap data is available and populated
 	if machine.Spec.Bootstrap.DataSecretName == nil {
 		log.Info("Bootstrap data secret reference is not yet available")
-		conditions.MarkFalse(contaboMachine, infrastructurev1beta1.InstanceReadyCondition, infrastructurev1beta1.WaitingForBootstrapDataReason, clusterv1.ConditionSeverityInfo, "")
+		meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+			Type:   infrastructurev1beta2.InstanceReadyCondition,
+			Status: metav1.ConditionFalse,
+			Reason: infrastructurev1beta2.WaitingForBootstrapDataReason,
+		})
 		return ctrl.Result{}, nil
 	}
 
@@ -206,7 +220,12 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 			}
 		}
 
-		conditions.MarkFalse(contaboMachine, infrastructurev1beta1.InstanceReadyCondition, infrastructurev1beta1.InstanceProvisioningFailedReason, clusterv1.ConditionSeverityError, "Failed to reconcile instance: %s", err.Error())
+		meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+			Type:    infrastructurev1beta2.InstanceReadyCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  infrastructurev1beta2.InstanceProvisioningFailedReason,
+			Message: fmt.Sprintf("Failed to reconcile instance: %s", err.Error()),
+		})
 		return ctrl.Result{}, err
 	}
 
@@ -223,12 +242,15 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 
 	// Set the machine as ready
 	contaboMachine.Status.Ready = true
-	conditions.MarkTrue(contaboMachine, infrastructurev1beta1.InstanceReadyCondition)
+	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.InstanceReadyCondition,
+		Status: metav1.ConditionTrue,
+	})
 
 	return ctrl.Result{}, nil
 }
 
-func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta1.ContaboMachine, contaboCluster *infrastructurev1beta1.ContaboCluster) (ctrl.Result, error) {
+func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	_ = contaboCluster // may be used in future for cluster-specific cleanup logic
 	log := logf.FromContext(ctx)
 
@@ -250,12 +272,12 @@ func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, machine 
 	log.Info("Instance state updated to available, instance ready for reuse")
 
 	// Remove our finalizer from the list and update it.
-	controllerutil.RemoveFinalizer(contaboMachine, infrastructurev1beta1.MachineFinalizer)
+	controllerutil.RemoveFinalizer(contaboMachine, infrastructurev1beta2.MachineFinalizer)
 
 	return ctrl.Result{}, nil
 }
 
-func (r *ContaboMachineReconciler) reconcileInstance(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta1.ContaboMachine, contaboCluster *infrastructurev1beta1.ContaboCluster, userData string) (*models.InstanceResponse, error) {
+func (r *ContaboMachineReconciler) reconcileInstance(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster, userData string) (*models.InstanceResponse, error) {
 	_ = machine        // may be used in future for machine-specific instance configuration
 	_ = contaboCluster // may be used in future for cluster-specific instance configuration
 	log := logf.FromContext(ctx)
@@ -328,7 +350,11 @@ func (r *ContaboMachineReconciler) reconcileInstance(ctx context.Context, machin
 
 	// Create a new instance if no available instance found or reuse failed
 	log.Info("Creating new instance")
-	conditions.MarkFalse(contaboMachine, infrastructurev1beta1.InstanceReadyCondition, infrastructurev1beta1.InstanceProvisioningReason, clusterv1.ConditionSeverityInfo, "")
+	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.InstanceReadyCondition,
+		Status: metav1.ConditionFalse,
+		Reason: infrastructurev1beta2.InstanceProvisioningReason,
+	})
 
 	// Use standardized Ubuntu image for all cluster machines for consistency and security
 	defaultImage := DefaultUbuntuImageID
@@ -399,7 +425,7 @@ func (r *ContaboMachineReconciler) reconcileInstance(ctx context.Context, machin
 }
 
 // findAvailableInstance searches for an available instance that can be reused
-func (r *ContaboMachineReconciler) findAvailableInstance(ctx context.Context, contaboMachine *infrastructurev1beta1.ContaboMachine) (*models.InstanceResponse, error) {
+func (r *ContaboMachineReconciler) findAvailableInstance(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine) (*models.InstanceResponse, error) {
 	log := logf.FromContext(ctx)
 
 	log.Info("Searching for available instances in region", "region", contaboMachine.Spec.Region, "productType", contaboMachine.Spec.InstanceType)
@@ -477,7 +503,7 @@ func (r *ContaboMachineReconciler) findAvailableInstance(ctx context.Context, co
 }
 
 // reinstallInstance reinstalls an instance with a new image and user data
-func (r *ContaboMachineReconciler) reinstallInstance(ctx context.Context, instanceID int64, contaboMachine *infrastructurev1beta1.ContaboMachine, userData string) error {
+func (r *ContaboMachineReconciler) reinstallInstance(ctx context.Context, instanceID int64, contaboMachine *infrastructurev1beta2.ContaboMachine, userData string) error {
 	log := logf.FromContext(ctx)
 
 	log.Info("Reinstalling instance with Ubuntu image", "instanceId", instanceID, "imageId", DefaultUbuntuImageID)
@@ -610,14 +636,14 @@ func (r *ContaboMachineReconciler) getBootstrapData(ctx context.Context, machine
 	return base64.StdEncoding.EncodeToString(userData), nil
 }
 
-func (r *ContaboMachineReconciler) updateMachineStatus(contaboMachine *infrastructurev1beta1.ContaboMachine, instance *models.InstanceResponse) {
+func (r *ContaboMachineReconciler) updateMachineStatus(contaboMachine *infrastructurev1beta2.ContaboMachine, instance *models.InstanceResponse) {
 	// Update instance state
-	state := infrastructurev1beta1.ContaboMachineInstanceState(instance.Status)
+	state := infrastructurev1beta2.ContaboMachineInstanceState(instance.Status)
 	contaboMachine.Status.InstanceState = &state
 
 	// Update network status
 	if contaboMachine.Status.Network == nil {
-		contaboMachine.Status.Network = &infrastructurev1beta1.ContaboMachineNetworkStatus{}
+		contaboMachine.Status.Network = &infrastructurev1beta2.ContaboMachineNetworkStatus{}
 	}
 	if instance.IpConfig.V4.Ip != "" {
 		contaboMachine.Status.Network.PrivateIP = &instance.IpConfig.V4.Ip
@@ -654,16 +680,16 @@ func (r *ContaboMachineReconciler) convertSSHKeyNamesToIDs(keyNames []string) []
 // SetupWithManager sets up the controller with the Manager.
 func (r *ContaboMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&infrastructurev1beta1.ContaboMachine{}).
+		For(&infrastructurev1beta2.ContaboMachine{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		WithEventFilter(predicates.ResourceNotPaused(ctrl.LoggerFrom(context.TODO()))).
+		WithEventFilter(predicates.ResourceNotPaused(mgr.GetScheme(), ctrl.LoggerFrom(context.TODO()))).
 		Watches(
 			&clusterv1.Machine{},
-			handler.EnqueueRequestsFromMapFunc(util.MachineToInfrastructureMapFunc(infrastructurev1beta1.GroupVersion.WithKind("ContaboMachine"))),
-			builder.WithPredicates(predicates.ResourceNotPaused(ctrl.LoggerFrom(context.TODO()))),
+			handler.EnqueueRequestsFromMapFunc(util.MachineToInfrastructureMapFunc(infrastructurev1beta2.GroupVersion.WithKind("ContaboMachine"))),
+			builder.WithPredicates(predicates.ResourceNotPaused(mgr.GetScheme(), ctrl.LoggerFrom(context.TODO()))),
 		).
 		Watches(
-			&infrastructurev1beta1.ContaboCluster{},
+			&infrastructurev1beta2.ContaboCluster{},
 			handler.EnqueueRequestsFromMapFunc(r.ContaboClusterToContaboMachines),
 		).
 		Named("contabomachine").
@@ -675,7 +701,7 @@ func (r *ContaboMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *ContaboMachineReconciler) ContaboClusterToContaboMachines(ctx context.Context, o client.Object) []reconcile.Request {
 	result := []reconcile.Request{}
 
-	cluster, ok := o.(*infrastructurev1beta1.ContaboCluster)
+	cluster, ok := o.(*infrastructurev1beta2.ContaboCluster)
 	if !ok {
 		return result
 	}

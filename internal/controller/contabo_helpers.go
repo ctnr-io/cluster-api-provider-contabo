@@ -21,7 +21,7 @@ import (
 	"strconv"
 	"strings"
 
-	infrastructurev1beta1 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta1"
+	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
 	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/models"
 	"github.com/google/uuid"
 )
@@ -99,18 +99,18 @@ func GetInstanceState(displayName string) string {
 }
 
 // MapInstanceStatusToMachineState maps Contabo instance status to ContaboMachineInstanceState
-func MapInstanceStatusToMachineState(status models.InstanceStatus) infrastructurev1beta1.ContaboMachineInstanceState {
+func MapInstanceStatusToMachineState(status models.InstanceStatus) infrastructurev1beta2.ContaboMachineInstanceState {
 	switch status {
 	case models.InstanceStatusRunning:
-		return infrastructurev1beta1.ContaboMachineInstanceStateRunning
+		return infrastructurev1beta2.ContaboMachineInstanceStateRunning
 	case models.InstanceStatusStopped:
-		return infrastructurev1beta1.ContaboMachineInstanceStateStopped
+		return infrastructurev1beta2.ContaboMachineInstanceStateStopped
 	case models.InstanceStatusProvisioning, models.InstanceStatusInstalling:
-		return infrastructurev1beta1.ContaboMachineInstanceStatePending
+		return infrastructurev1beta2.ContaboMachineInstanceStatePending
 	case models.InstanceStatusError, models.InstanceStatusUnknown:
-		return infrastructurev1beta1.ContaboMachineInstanceStateUnknown
+		return infrastructurev1beta2.ContaboMachineInstanceStateUnknown
 	default:
-		return infrastructurev1beta1.ContaboMachineInstanceStateUnknown
+		return infrastructurev1beta2.ContaboMachineInstanceStateUnknown
 	}
 }
 
@@ -153,7 +153,7 @@ func ConvertRegionToCreateInstanceRegion(region string) *models.CreateInstanceRe
 
 // BuildInstanceDisplayName creates a descriptive display name for a Contabo instance
 // Format: "<cluster-name>-<short-cluster-id>-<machine-name>" (shortened for space)
-func BuildInstanceDisplayName(cluster *infrastructurev1beta1.ContaboCluster, machineName string) string {
+func BuildInstanceDisplayName(cluster *infrastructurev1beta2.ContaboCluster, machineName string) string {
 	clusterUUID := GetClusterUUID(cluster)
 	shortID := BuildShortClusterID(clusterUUID)
 	return fmt.Sprintf("%s-%s-%s", cluster.Name, shortID, machineName)
@@ -186,7 +186,7 @@ func GetClusterIDFromDisplayName(displayName string) string {
 // EnsureClusterUUID ensures the cluster has a unique UUID label
 // If the cluster doesn't have a UUID label, generates a new UUID v4 and returns it
 // If it already has one, returns the existing UUID
-func EnsureClusterUUID(cluster *infrastructurev1beta1.ContaboCluster) string {
+func EnsureClusterUUID(cluster *infrastructurev1beta2.ContaboCluster) string {
 	if cluster.Labels == nil {
 		cluster.Labels = make(map[string]string)
 	}
@@ -203,7 +203,7 @@ func EnsureClusterUUID(cluster *infrastructurev1beta1.ContaboCluster) string {
 
 // GetClusterUUID retrieves the cluster UUID from labels
 // Returns empty string if no UUID is set
-func GetClusterUUID(cluster *infrastructurev1beta1.ContaboCluster) string {
+func GetClusterUUID(cluster *infrastructurev1beta2.ContaboCluster) string {
 	if cluster.Labels == nil {
 		return ""
 	}

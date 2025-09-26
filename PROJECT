@@ -16,8 +16,8 @@ resources:
   domain: cluster.x-k8s.io
   group: infrastructure
   kind: ContaboCluster
-  path: github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta1
-  version: v1beta1
+  path: github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2
+  version: v1beta2
 - api:
     crdVersion: v1
     namespaced: true
@@ -25,14 +25,14 @@ resources:
   domain: cluster.x-k8s.io
   group: infrastructure
   kind: ContaboMachine
-  path: github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta1
-  version: v1beta1
+  path: github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2
+  version: v1beta2
 - api:
     crdVersion: v1
     namespaced: true
   domain: cluster.x-k8s.io
   group: infrastructure
   kind: ContaboMachineTemplate
-  path: github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta1
-  version: v1beta1
+  path: github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2
+  version: v1beta2
 version: "3"

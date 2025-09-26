@@ -14,11 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1beta1
+package v1beta2
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -93,7 +94,7 @@ type ContaboMachineStatus struct {
 
 	// Conditions defines current service state of the ContaboMachine.
 	// +optional
-	Conditions clusterv1.Conditions `json:"conditions,omitempty"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// FailureReason will be set in the event that there is a terminal problem
 	// reconciling the Machine and will contain a succinct value suitable
@@ -208,10 +209,29 @@ func init() {
 
 // GetConditions returns the conditions of the ContaboMachine.
 func (m *ContaboMachine) GetConditions() clusterv1.Conditions {
-	return m.Status.Conditions
+	conditions := make(clusterv1.Conditions, len(m.Status.Conditions))
+	for i, condition := range m.Status.Conditions {
+		conditions[i] = clusterv1.Condition{
+			Type:               clusterv1.ConditionType(condition.Type),
+			Status:             corev1.ConditionStatus(condition.Status),
+			LastTransitionTime: condition.LastTransitionTime,
+			Reason:             condition.Reason,
+			Message:            condition.Message,
+		}
+	}
+	return conditions
 }
 
 // SetConditions sets the conditions of the ContaboMachine.
 func (m *ContaboMachine) SetConditions(conditions clusterv1.Conditions) {
-	m.Status.Conditions = conditions
+	m.Status.Conditions = make([]metav1.Condition, len(conditions))
+	for i, condition := range conditions {
+		m.Status.Conditions[i] = metav1.Condition{
+			Type:               string(condition.Type),
+			Status:             metav1.ConditionStatus(condition.Status),
+			LastTransitionTime: condition.LastTransitionTime,
+			Reason:             condition.Reason,
+			Message:            condition.Message,
+		}
+	}
 }

@@ -12,10 +12,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    cluster.x-k8s.io/v1beta2: v1beta2
   name: contaboclusters.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
   names:
+    categories:
+    - cluster-api
     kind: ContaboCluster
     listKind: ContaboClusterList
     plural: contaboclusters
@@ -40,7 +44,7 @@ spec:
       name: Endpoint
       priority: 1
       type: string
-    name: v1beta1
+    name: v1beta2
     schema:
       openAPIV3Schema:
         description: ContaboCluster is the Schema for the contaboclusters API
@@ -68,43 +72,39 @@ spec:
               controlPlaneEndpoint:
                 description: ControlPlaneEndpoint represents the endpoint used to
                   communicate with the control plane.
+                minProperties: 1
                 properties:
                   host:
-                    description: The hostname on which the API server is serving.
+                    description: host is the hostname on which the API server is serving.
+                    maxLength: 512
+                    minLength: 1
                     type: string
                   port:
-                    description: The port on which the API server is serving.
+                    description: port is the port on which the API server is serving.
                     format: int32
+                    maximum: 65535
+                    minimum: 1
                     type: integer
-                required:
-                - host
-                - port
                 type: object
               network:
                 description: Network configuration for the cluster
                 properties:
-                  subnets:
-                    description: Subnet configuration
+                  privateNetworks:
+                    description: |-
+                      PrivateNetworks is a list of private network names to use for the cluster
+                      The CIDR and datacenter information will be populated in the status after discovery
                     items:
-                      description: ContaboSubnetSpec defines a subnet configuration
+                      description: ContaboPrivateNetworkSpec defines a private network
+                        configuration
                       properties:
-                        availabilityZone:
-                          description: Availability zone for the subnet
-                          type: string
-                        cidr:
-                          description: CIDR block for the subnet
-                          type: string
                         name:
-                          description: Name of the subnet
+                          description: Name of the private network to use (must exist
+                            in Contabo)
                           type: string
                       required:
-                      - cidr
                       - name
                       type: object
                     type: array
-                  vpcId:
-                    description: VPC ID for the cluster resources
-                    type: string
                 type: object
               region:
                 description: Region is the Contabo region where the cluster will be
@@ -119,97 +119,137 @@ spec:
               conditions:
                 description: Conditions defines current service state of the ContaboCluster.
                 items:
-                  description: Condition defines an observation of a Cluster API resource
-                    operational state.
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
                   properties:
                     lastTransitionTime:
                       description: |-
-                        Last time the condition transitioned from one status to another.
-                        This should be when the underlying condition changed. If that is not known, then using the time when
-                        the API field changed is acceptable.
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
                       format: date-time
                       type: string
                     message:
                       description: |-
-                        A human readable message indicating details about the transition.
-                        This field may be empty.
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
                       type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
                     reason:
                       description: |-
-                        The reason for the condition's last transition in CamelCase.
-                        The specific API may choose whether or not this field is considered a guaranteed API.
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
                         This field may not be empty.
-                      type: string
-                    severity:
-                      description: |-
-                        Severity provides an explicit classification of Reason code, so the users or machines can immediately
-                        understand the current situation and act accordingly.
-                        The Severity field MUST be set only when Status=False.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
                       type: string
                     status:
-                      description: Status of the condition, one of True, False, Unknown.
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
                       type: string
                     type:
-                      description: |-
-                        Type of condition in CamelCase or in foo.example.com/CamelCase.
-                        Many .condition.type values are consistent across resources like Available, but because arbitrary conditions
-                        can be useful (see .node.status.conditions), the ability to deconflict is important.
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                       type: string
                   required:
                   - lastTransitionTime
+                  - message
+                  - reason
                   - status
                   - type
                   type: object
                 type: array
               failureDomains:
-                additionalProperties:
+                description: FailureDomains is a list of failure domains that machines
+                  can be placed in.
+                items:
                   description: |-
-                    FailureDomainSpec is the Schema for Cluster API failure domains.
+                    FailureDomain is the Schema for Cluster API failure domains.
                     It allows controllers to understand how many failure domains a cluster can optionally span across.
                   properties:
                     attributes:
                       additionalProperties:
                         type: string
-                      description: Attributes is a free form map of attributes an
+                      description: attributes is a free form map of attributes an
                         infrastructure provider might use or require.
                       type: object
                     controlPlane:
-                      description: ControlPlane determines if this failure domain
+                      description: controlPlane determines if this failure domain
                         is suitable for use by control plane machines.
                       type: boolean
+                    name:
+                      description: name is the name of the failure domain.
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
                   type: object
-                description: FailureDomains is a list of failure domains that machines
-                  can be placed in.
-                type: object
+                type: array
               network:
                 description: Network describes the cluster network configuration
                 properties:
-                  subnets:
-                    description: Subnets is a list of subnets
+                  dataCenter:
+                    description: |-
+                      DataCenter contains information about the datacenter where resources are located
+                      This is populated after instances are created and their datacenter is discovered
+                    properties:
+                      code:
+                        description: Code of the datacenter (e.g., "EU")
+                        type: string
+                      name:
+                        description: Name of the datacenter (e.g., "European Union
+                          (Germany)")
+                        type: string
+                    required:
+                    - code
+                    - name
+                    type: object
+                  privateNetworks:
+                    description: PrivateNetworks contains the discovered information
+                      about private networks
                     items:
-                      description: ContaboSubnetStatus defines the status of a subnet
+                      description: ContaboPrivateNetworkStatus defines the status
+                        of a private network
                       properties:
-                        availabilityZone:
-                          description: AvailabilityZone of the subnet
-                          type: string
                         cidr:
-                          description: CIDR block of the subnet
+                          description: CIDR block of the private network (discovered
+                            from Contabo)
+                          type: string
+                        dataCenter:
+                          description: DataCenter where this private network is located
                           type: string
                         id:
-                          description: ID of the subnet
+                          description: ID of the private network in Contabo
                           type: string
                         name:
-                          description: Name of the subnet
+                          description: Name of the private network
+                          type: string
+                        region:
+                          description: Region where this private network is located
                           type: string
                       required:
                       - cidr
+                      - dataCenter
                       - id
                       - name
+                      - region
                       type: object
                     type: array
-                  vpcId:
-                    description: VPCID is the ID of the VPC
-                    type: string
                 type: object
               ready:
                 description: Ready denotes that the cluster (infrastructure) is ready.
@@ -228,10 +268,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    cluster.x-k8s.io/v1beta2: v1beta2
   name: contabomachines.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
   names:
+    categories:
+    - cluster-api
     kind: ContaboMachine
     listKind: ContaboMachineList
     plural: contabomachines
@@ -263,7 +307,7 @@ spec:
       jsonPath: .metadata.ownerReferences[?(@.kind=="Machine")].name
       name: Machine
       type: string
-    name: v1beta1
+    name: v1beta2
     schema:
       openAPIV3Schema:
         description: ContaboMachine is the Schema for the contabomachines API
@@ -300,9 +344,6 @@ spec:
                 description: AdditionalTags is additional tags to be added to the
                   machine.
                 type: object
-              image:
-                description: Image is the OS image to use for the machine.
-                type: string
               instanceType:
                 description: InstanceType is the Contabo instance type for the machine.
                 type: string
@@ -340,7 +381,6 @@ spec:
                 description: UserData is the cloud-init user data to use for the machine.
                 type: string
             required:
-            - image
             - instanceType
             - region
             type: object
@@ -354,11 +394,19 @@ spec:
                     address.
                   properties:
                     address:
-                      description: The machine address.
+                      description: address is the machine address.
+                      maxLength: 256
+                      minLength: 1
                       type: string
                     type:
-                      description: Machine address type, one of Hostname, ExternalIP,
-                        InternalIP, ExternalDNS or InternalDNS.
+                      description: type is the machine address type, one of Hostname,
+                        ExternalIP, InternalIP, ExternalDNS or InternalDNS.
+                      enum:
+                      - Hostname
+                      - ExternalIP
+                      - InternalIP
+                      - ExternalDNS
+                      - InternalDNS
                       type: string
                   required:
                   - address
@@ -368,44 +416,56 @@ spec:
               conditions:
                 description: Conditions defines current service state of the ContaboMachine.
                 items:
-                  description: Condition defines an observation of a Cluster API resource
-                    operational state.
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
                   properties:
                     lastTransitionTime:
                       description: |-
-                        Last time the condition transitioned from one status to another.
-                        This should be when the underlying condition changed. If that is not known, then using the time when
-                        the API field changed is acceptable.
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
                       format: date-time
                       type: string
                     message:
                       description: |-
-                        A human readable message indicating details about the transition.
-                        This field may be empty.
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
                       type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
                     reason:
                       description: |-
-                        The reason for the condition's last transition in CamelCase.
-                        The specific API may choose whether or not this field is considered a guaranteed API.
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
                         This field may not be empty.
-                      type: string
-                    severity:
-                      description: |-
-                        Severity provides an explicit classification of Reason code, so the users or machines can immediately
-                        understand the current situation and act accordingly.
-                        The Severity field MUST be set only when Status=False.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
                       type: string
                     status:
-                      description: Status of the condition, one of True, False, Unknown.
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
                       type: string
                     type:
-                      description: |-
-                        Type of condition in CamelCase or in foo.example.com/CamelCase.
-                        Many .condition.type values are consistent across resources like Available, but because arbitrary conditions
-                        can be useful (see .node.status.conditions), the ability to deconflict is important.
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                       type: string
                   required:
                   - lastTransitionTime
+                  - message
+                  - reason
                   - status
                   - type
                   type: object
@@ -481,6 +541,8 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    cluster.x-k8s.io/v1beta2: v1beta2
   name: contabomachinetemplates.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -498,7 +560,7 @@ spec:
       jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    name: v1beta1
+    name: v1beta2
     schema:
       openAPIV3Schema:
         description: ContaboMachineTemplate is the Schema for the contabomachinetemplates
@@ -543,9 +605,6 @@ spec:
                         description: AdditionalTags is additional tags to be added
                           to the machine.
                         type: object
-                      image:
-                        description: Image is the OS image to use for the machine.
-                        type: string
                       instanceType:
                         description: InstanceType is the Contabo instance type for
                           the machine.
@@ -585,7 +644,6 @@ spec:
                           the machine.
                         type: string
                     required:
-                    - image
                     - instanceType
                     - region
                     type: object
@@ -994,6 +1052,18 @@ subjects:
   namespace: cluster-api-provider-contabo-system
 ---
 apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-api-provider-contabo-contabo-credentials
+  namespace: cluster-api-provider-contabo-system
+stringData:
+  api-password: ${CONTABO_API_PASSWORD}
+  api-user: ${CONTABO_API_USER}
+  client-id: ${CONTABO_CLIENT_ID}
+  client-secret: ${CONTABO_CLIENT_SECRET}
+type: Opaque
+---
+apiVersion: v1
 kind: Service
 metadata:
   labels:
@@ -1042,8 +1112,37 @@ spec:
         - --health-probe-bind-address=:8081
         command:
         - /manager
+        env:
+        - name: CONTABO_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              key: client-id
+              name: cluster-api-provider-contabo-contabo-credentials
+              optional: true
+        - name: CONTABO_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: client-secret
+              name: cluster-api-provider-contabo-contabo-credentials
+              optional: true
+        - name: CONTABO_API_USER
+          valueFrom:
+            secretKeyRef:
+              key: api-user
+              name: cluster-api-provider-contabo-contabo-credentials
+              optional: true
+        - name: CONTABO_API_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: api-password
+              name: cluster-api-provider-contabo-contabo-credentials
+              optional: true
+        - name: CONTROLLER_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         image: controller:latest
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
             path: /healthz

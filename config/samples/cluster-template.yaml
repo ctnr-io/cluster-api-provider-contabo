@@ -1,4 +1,4 @@
-apiVersion: cluster.x-k8s.io/v1beta1
+apiVersion: cluster.x-k8s.io/v1beta2
 kind: Cluster
 metadata:
   name: contabo-cluster
@@ -9,17 +9,17 @@ spec:
       cidrBlocks:
       - 192.168.0.0/16
   infrastructureRef:
-    apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+    apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
     kind: ContaboCluster
     name: contabo-cluster
     namespace: default
   controlPlaneRef:
     kind: KubeadmControlPlane
-    apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+    apiVersion: controlplane.cluster.x-k8s.io/v1beta2
     name: contabo-cluster-control-plane
     namespace: default
 ---
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ContaboCluster
 metadata:
   name: contabo-cluster
@@ -30,7 +30,7 @@ spec:
     privateNetworks:
     - name: "default-network"
 ---
-apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+apiVersion: controlplane.cluster.x-k8s.io/v1beta2
 kind: KubeadmControlPlane
 metadata:
   name: contabo-cluster-control-plane
@@ -40,7 +40,7 @@ spec:
   machineTemplate:
     infrastructureRef:
       kind: ContaboMachine
-      apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+      apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
       name: contabo-cluster-control-plane
       namespace: default
   kubeadmConfigSpec:
@@ -63,7 +63,7 @@ spec:
           cloud-provider: external
   version: "v1.28.0"
 ---
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ContaboMachine
 metadata:
   name: contabo-cluster-control-plane
@@ -84,7 +84,7 @@ spec:
     subnetName: "default"
     publicIP: true
 ---
-apiVersion: cluster.x-k8s.io/v1beta1
+apiVersion: cluster.x-k8s.io/v1beta2
 kind: MachineDeployment
 metadata:
   name: contabo-cluster-workers
@@ -107,16 +107,16 @@ spec:
       bootstrap:
         configRef:
           name: contabo-cluster-workers
-          apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+          apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
           kind: KubeadmConfigTemplate
           namespace: default
       infrastructureRef:
         name: contabo-cluster-workers
-        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
         kind: ContaboMachineTemplate
         namespace: default
 ---
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ContaboMachineTemplate
 metadata:
   name: contabo-cluster-workers
@@ -139,7 +139,7 @@ spec:
         subnetName: "default"
         publicIP: true
 ---
-apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
 kind: KubeadmConfigTemplate
 metadata:
   name: contabo-cluster-workers

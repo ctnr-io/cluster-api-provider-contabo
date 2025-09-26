@@ -23,12 +23,13 @@ import (
 	"strconv"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
-	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -39,7 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	infrastructurev1beta1 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta1"
+	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
 	contaboclient "github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/client"
 	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/models"
 )
@@ -63,7 +64,7 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	log := logf.FromContext(ctx)
 
 	// Fetch the ContaboCluster instance
-	contaboCluster := &infrastructurev1beta1.ContaboCluster{}
+	contaboCluster := &infrastructurev1beta2.ContaboCluster{}
 	if err := r.Get(ctx, req.NamespacedName, contaboCluster); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -112,15 +113,15 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return r.reconcileNormal(ctx, contaboCluster)
 }
 
-func (r *ContaboClusterReconciler) reconcileNormal(ctx context.Context, contaboCluster *infrastructurev1beta1.ContaboCluster) (ctrl.Result, error) {
+func (r *ContaboClusterReconciler) reconcileNormal(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	// If the ContaboCluster doesn't have our finalizer, add it.
-	controllerutil.AddFinalizer(contaboCluster, infrastructurev1beta1.ClusterFinalizer)
+	controllerutil.AddFinalizer(contaboCluster, infrastructurev1beta2.ClusterFinalizer)
 
 	// Always ensure status is initialized
 	if contaboCluster.Status.Conditions == nil {
-		contaboCluster.Status.Conditions = []clusterv1.Condition{}
+		contaboCluster.Status.Conditions = []metav1.Condition{}
 	}
 
 	// Ensure cluster has a unique UUID for global identification
@@ -128,7 +129,11 @@ func (r *ContaboClusterReconciler) reconcileNormal(ctx context.Context, contaboC
 	log.Info("Cluster UUID ensured", "uuid", clusterUUID)
 
 	// Set the cluster in a progressing state
-	conditions.MarkFalse(contaboCluster, infrastructurev1beta1.ReadyCondition, infrastructurev1beta1.CreatingReason, clusterv1.ConditionSeverityInfo, "")
+	meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.ReadyCondition,
+		Status: metav1.ConditionFalse,
+		Reason: infrastructurev1beta2.CreatingReason,
+	})
 
 	log.Info("Starting ContaboCluster reconciliation",
 		"cluster", contaboCluster.Name,
@@ -137,8 +142,23 @@ func (r *ContaboClusterReconciler) reconcileNormal(ctx context.Context, contaboC
 
 	// Reconcile network infrastructure
 	if err := r.reconcileNetwork(ctx, contaboCluster); err != nil {
-		log.Error(err, "failed to reconcile network")
-		conditions.MarkFalse(contaboCluster, infrastructurev1beta1.ReadyCondition, infrastructurev1beta1.NetworkInfrastructureFailedReason, clusterv1.ConditionSeverityError, "Failed to reconcile network: %s", err.Error())
+		log.Error(err, "failed to reconcile network",
+			"cluster", contaboCluster.Name,
+			"namespace", contaboCluster.Namespace,
+			"region", contaboCluster.Spec.Region)
+
+		// Set network infrastructure failed condition
+		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+			Type:    infrastructurev1beta2.ReadyCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  infrastructurev1beta2.NetworkInfrastructureFailedReason,
+			Message: fmt.Sprintf("Failed to reconcile network: %s", err.Error()),
+		})
+
+		// Record event for visibility
+		r.Recorder.Eventf(contaboCluster, "Warning", "NetworkReconciliationFailed", "Failed to reconcile network infrastructure: %v", err)
+
+		// Return error to fail reconciliation - this will cause tests to detect the failure
 		return ctrl.Result{}, err
 	}
 
@@ -147,19 +167,26 @@ func (r *ContaboClusterReconciler) reconcileNormal(ctx context.Context, contaboC
 		log.Info("Control plane endpoint not set, will be set by the first control plane machine")
 		// The control plane endpoint will be set by the first control plane machine
 		// For now, we'll mark the cluster as not ready and return
-		conditions.MarkFalse(contaboCluster, infrastructurev1beta1.ReadyCondition, infrastructurev1beta1.WaitingForControlPlaneEndpointReason, clusterv1.ConditionSeverityInfo, "")
+		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+			Type:   infrastructurev1beta2.ReadyCondition,
+			Status: metav1.ConditionFalse,
+			Reason: infrastructurev1beta2.WaitingForControlPlaneEndpointReason,
+		})
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
 	// Mark the cluster as ready
 	contaboCluster.Status.Ready = true
-	conditions.MarkTrue(contaboCluster, infrastructurev1beta1.ReadyCondition)
+	meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.ReadyCondition,
+		Status: metav1.ConditionTrue,
+	})
 
 	return ctrl.Result{}, nil
 }
 
 //nolint:unparam // reconcileDelete may return different ctrl.Result values in future implementations
-func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, cluster *clusterv1.Cluster, contaboCluster *infrastructurev1beta1.ContaboCluster) (ctrl.Result, error) {
+func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, cluster *clusterv1.Cluster, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	log.Info("Reconciling ContaboCluster delete")
@@ -171,36 +198,60 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, cluster 
 	}
 
 	// Remove our finalizer from the list and update it.
-	controllerutil.RemoveFinalizer(contaboCluster, infrastructurev1beta1.ClusterFinalizer)
+	controllerutil.RemoveFinalizer(contaboCluster, infrastructurev1beta2.ClusterFinalizer)
 
 	return ctrl.Result{}, nil
 }
 
-func (r *ContaboClusterReconciler) reconcileNetwork(ctx context.Context, contaboCluster *infrastructurev1beta1.ContaboCluster) error {
+func (r *ContaboClusterReconciler) reconcileNetwork(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
 	log := logf.FromContext(ctx)
 
 	// Initialize network status if not present
 	if contaboCluster.Status.Network == nil {
-		contaboCluster.Status.Network = &infrastructurev1beta1.ContaboNetworkStatus{}
+		contaboCluster.Status.Network = &infrastructurev1beta2.ContaboNetworkStatus{}
 	}
 
 	// If no network spec is provided, skip network reconciliation
 	if contaboCluster.Spec.Network == nil {
 		log.Info("No network specification provided, skipping network reconciliation")
+		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+			Type:    infrastructurev1beta2.NetworkInfrastructureReadyCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  infrastructurev1beta2.NetworkInfrastructureSkippedReason,
+			Message: "No network configuration specified",
+		})
 		return nil
 	}
+
+	// Set network infrastructure as creating
+	meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+		Type:    infrastructurev1beta2.NetworkInfrastructureReadyCondition,
+		Status:  metav1.ConditionFalse,
+		Reason:  infrastructurev1beta2.NetworkInfrastructureCreatingReason,
+		Message: "Creating network infrastructure",
+	})
 
 	// Reconcile private networks
 	if err := r.reconcilePrivateNetworks(ctx, contaboCluster); err != nil {
 		log.Error(err, "failed to reconcile private networks")
+		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+			Type:    infrastructurev1beta2.NetworkInfrastructureReadyCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  infrastructurev1beta2.NetworkInfrastructureFailedReason,
+			Message: fmt.Sprintf("Failed to reconcile private networks: %s", err.Error()),
+		})
 		return err
 	}
 
 	log.Info("Network infrastructure reconciled successfully")
+	meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.NetworkInfrastructureReadyCondition,
+		Status: metav1.ConditionTrue,
+	})
 	return nil
 }
 
-func (r *ContaboClusterReconciler) reconcilePrivateNetworks(ctx context.Context, contaboCluster *infrastructurev1beta1.ContaboCluster) error {
+func (r *ContaboClusterReconciler) reconcilePrivateNetworks(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
 	log := logf.FromContext(ctx)
 
 	if contaboCluster.Spec.Network == nil || len(contaboCluster.Spec.Network.PrivateNetworks) == 0 {
@@ -209,7 +260,7 @@ func (r *ContaboClusterReconciler) reconcilePrivateNetworks(ctx context.Context,
 
 	// Initialize private network status slice if not present
 	if contaboCluster.Status.Network.PrivateNetworks == nil {
-		contaboCluster.Status.Network.PrivateNetworks = []infrastructurev1beta1.ContaboPrivateNetworkStatus{}
+		contaboCluster.Status.Network.PrivateNetworks = []infrastructurev1beta2.ContaboPrivateNetworkStatus{}
 	}
 
 	// Process each private network specification
@@ -286,7 +337,7 @@ func (r *ContaboClusterReconciler) verifyPrivateNetworkExists(ctx context.Contex
 	return nil
 }
 
-func (r *ContaboClusterReconciler) ensurePrivateNetwork(ctx context.Context, contaboCluster *infrastructurev1beta1.ContaboCluster, networkSpec infrastructurev1beta1.ContaboPrivateNetworkSpec) (*infrastructurev1beta1.ContaboPrivateNetworkStatus, error) {
+func (r *ContaboClusterReconciler) ensurePrivateNetwork(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster, networkSpec infrastructurev1beta2.ContaboPrivateNetworkSpec) (*infrastructurev1beta2.ContaboPrivateNetworkStatus, error) {
 	log := logf.FromContext(ctx)
 
 	log.Info("Discovering/creating private network", "networkName", networkSpec.Name)
@@ -308,7 +359,7 @@ func (r *ContaboClusterReconciler) ensurePrivateNetwork(ctx context.Context, con
 	return r.createPrivateNetwork(ctx, contaboCluster, networkSpec)
 }
 
-func (r *ContaboClusterReconciler) findPrivateNetworkByName(ctx context.Context, networkName string) (*infrastructurev1beta1.ContaboPrivateNetworkStatus, error) {
+func (r *ContaboClusterReconciler) findPrivateNetworkByName(ctx context.Context, networkName string) (*infrastructurev1beta2.ContaboPrivateNetworkStatus, error) {
 	log := logf.FromContext(ctx)
 
 	// Iterate through all pages to find the network
@@ -346,7 +397,7 @@ func (r *ContaboClusterReconciler) findPrivateNetworkByName(ctx context.Context,
 			if network.Name == networkName {
 				log.Info("Found existing private network", "networkName", networkName, "networkID", network.PrivateNetworkId)
 
-				return &infrastructurev1beta1.ContaboPrivateNetworkStatus{
+				return &infrastructurev1beta2.ContaboPrivateNetworkStatus{
 					Name:       network.Name,
 					ID:         strconv.FormatInt(network.PrivateNetworkId, 10),
 					CIDR:       network.Cidr,
@@ -371,7 +422,7 @@ func (r *ContaboClusterReconciler) findPrivateNetworkByName(ctx context.Context,
 	return nil, nil
 }
 
-func (r *ContaboClusterReconciler) createPrivateNetwork(ctx context.Context, contaboCluster *infrastructurev1beta1.ContaboCluster, networkSpec infrastructurev1beta1.ContaboPrivateNetworkSpec) (*infrastructurev1beta1.ContaboPrivateNetworkStatus, error) {
+func (r *ContaboClusterReconciler) createPrivateNetwork(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster, networkSpec infrastructurev1beta2.ContaboPrivateNetworkSpec) (*infrastructurev1beta2.ContaboPrivateNetworkStatus, error) {
 	log := logf.FromContext(ctx)
 
 	// Prepare create request
@@ -420,7 +471,7 @@ func (r *ContaboClusterReconciler) createPrivateNetwork(ctx context.Context, con
 		"cidr", createdNetwork.Cidr,
 		"dataCenter", createdNetwork.DataCenter)
 
-	return &infrastructurev1beta1.ContaboPrivateNetworkStatus{
+	return &infrastructurev1beta2.ContaboPrivateNetworkStatus{
 		Name:       createdNetwork.Name,
 		ID:         strconv.FormatInt(createdNetwork.PrivateNetworkId, 10),
 		CIDR:       createdNetwork.Cidr,
@@ -429,7 +480,7 @@ func (r *ContaboClusterReconciler) createPrivateNetwork(ctx context.Context, con
 	}, nil
 }
 
-func (r *ContaboClusterReconciler) deleteNetwork(ctx context.Context, contaboCluster *infrastructurev1beta1.ContaboCluster) error {
+func (r *ContaboClusterReconciler) deleteNetwork(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
 	log := logf.FromContext(ctx)
 
 	// Delete private networks if they were created by this cluster
@@ -442,7 +493,7 @@ func (r *ContaboClusterReconciler) deleteNetwork(ctx context.Context, contaboClu
 	return nil
 }
 
-func (r *ContaboClusterReconciler) deletePrivateNetworks(ctx context.Context, contaboCluster *infrastructurev1beta1.ContaboCluster) error {
+func (r *ContaboClusterReconciler) deletePrivateNetworks(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
 	log := logf.FromContext(ctx)
 
 	if contaboCluster.Status.Network == nil || len(contaboCluster.Status.Network.PrivateNetworks) == 0 {
@@ -555,13 +606,13 @@ func (r *ContaboClusterReconciler) retrievePrivateNetworkData(ctx context.Contex
 // SetupWithManager sets up the controller with the Manager.
 func (r *ContaboClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&infrastructurev1beta1.ContaboCluster{}).
+		For(&infrastructurev1beta2.ContaboCluster{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
-		WithEventFilter(predicates.ResourceNotPaused(ctrl.LoggerFrom(context.TODO()))).
+		WithEventFilter(predicates.ResourceNotPaused(mgr.GetScheme(), ctrl.LoggerFrom(context.TODO()))).
 		Watches(
 			&clusterv1.Cluster{},
-			handler.EnqueueRequestsFromMapFunc(util.ClusterToInfrastructureMapFunc(context.TODO(), infrastructurev1beta1.GroupVersion.WithKind("ContaboCluster"), mgr.GetClient(), &infrastructurev1beta1.ContaboCluster{})),
-			builder.WithPredicates(predicates.ClusterUnpaused(ctrl.LoggerFrom(context.TODO()))),
+			handler.EnqueueRequestsFromMapFunc(util.ClusterToInfrastructureMapFunc(context.TODO(), infrastructurev1beta2.GroupVersion.WithKind("ContaboCluster"), mgr.GetClient(), &infrastructurev1beta2.ContaboCluster{})),
+			builder.WithPredicates(predicates.ClusterUnpaused(mgr.GetScheme(), ctrl.LoggerFrom(context.TODO()))),
 		).
 		Named("contabocluster").
 		Complete(r)

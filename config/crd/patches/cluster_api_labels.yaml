@@ -5,7 +5,7 @@ kind: CustomResourceDefinition
 metadata:
   name: contaboclusters.infrastructure.cluster.x-k8s.io
   labels:
-    cluster.x-k8s.io/v1beta1: v1beta1
+    cluster.x-k8s.io/v1beta2: v1beta2
 ---
 # Add Cluster API contract version labels to ContaboMachine CRD
 apiVersion: apiextensions.k8s.io/v1
@@ -13,7 +13,7 @@ kind: CustomResourceDefinition
 metadata:
   name: contabomachines.infrastructure.cluster.x-k8s.io
   labels:
-    cluster.x-k8s.io/v1beta1: v1beta1
+    cluster.x-k8s.io/v1beta2: v1beta2
 ---
 # Add Cluster API contract version labels to ContaboMachineTemplate CRD
 apiVersion: apiextensions.k8s.io/v1
@@ -21,4 +21,4 @@ kind: CustomResourceDefinition
 metadata:
   name: contabomachinetemplates.infrastructure.cluster.x-k8s.io
   labels:
-    cluster.x-k8s.io/v1beta1: v1beta1
+    cluster.x-k8s.io/v1beta2: v1beta2

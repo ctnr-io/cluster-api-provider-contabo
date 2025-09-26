@@ -27,7 +27,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	infrastructurev1beta1 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta1"
+	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
 )
 
 var _ = Describe("ContaboCluster Controller", func() {
@@ -40,13 +40,13 @@ var _ = Describe("ContaboCluster Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		contabocluster := &infrastructurev1beta1.ContaboCluster{}
+		contabocluster := &infrastructurev1beta2.ContaboCluster{}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind ContaboCluster")
 			err := k8sClient.Get(ctx, typeNamespacedName, contabocluster)
 			if err != nil && errors.IsNotFound(err) {
-				resource := &infrastructurev1beta1.ContaboCluster{
+				resource := &infrastructurev1beta2.ContaboCluster{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
 						Namespace: "default",
@@ -59,7 +59,7 @@ var _ = Describe("ContaboCluster Controller", func() {
 
 		AfterEach(func() {
 			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &infrastructurev1beta1.ContaboCluster{}
+			resource := &infrastructurev1beta2.ContaboCluster{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 

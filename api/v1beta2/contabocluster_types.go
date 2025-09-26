@@ -14,11 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1beta1
+package v1beta2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -67,11 +67,11 @@ type ContaboClusterStatus struct {
 
 	// Conditions defines current service state of the ContaboCluster.
 	// +optional
-	Conditions clusterv1.Conditions `json:"conditions,omitempty"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// FailureDomains is a list of failure domains that machines can be placed in.
 	// +optional
-	FailureDomains clusterv1.FailureDomains `json:"failureDomains,omitempty"`
+	FailureDomains []clusterv1.FailureDomain `json:"failureDomains,omitempty"`
 }
 
 // ContaboNetworkStatus defines the network status discovered from Contabo
@@ -153,11 +153,11 @@ func init() {
 }
 
 // GetConditions returns the conditions of the ContaboCluster.
-func (c *ContaboCluster) GetConditions() clusterv1.Conditions {
+func (c *ContaboCluster) GetConditions() []metav1.Condition {
 	return c.Status.Conditions
 }
 
 // SetConditions sets the conditions of the ContaboCluster.
-func (c *ContaboCluster) SetConditions(conditions clusterv1.Conditions) {
+func (c *ContaboCluster) SetConditions(conditions []metav1.Condition) {
 	c.Status.Conditions = conditions
 }

@@ -27,7 +27,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	infrastructurev1beta1 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta1"
+	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
 )
 
 var _ = Describe("ContaboMachine Controller", func() {
@@ -40,13 +40,13 @@ var _ = Describe("ContaboMachine Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		contabomachine := &infrastructurev1beta1.ContaboMachine{}
+		contabomachine := &infrastructurev1beta2.ContaboMachine{}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind ContaboMachine")
 			err := k8sClient.Get(ctx, typeNamespacedName, contabomachine)
 			if err != nil && errors.IsNotFound(err) {
-				resource := &infrastructurev1beta1.ContaboMachine{
+				resource := &infrastructurev1beta2.ContaboMachine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
 						Namespace: "default",
@@ -59,7 +59,7 @@ var _ = Describe("ContaboMachine Controller", func() {
 
 		AfterEach(func() {
 			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &infrastructurev1beta1.ContaboMachine{}
+			resource := &infrastructurev1beta2.ContaboMachine{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 
