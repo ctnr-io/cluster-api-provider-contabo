@@ -34,25 +34,9 @@ type ContaboClusterSpec struct {
 	// +optional
 	ControlPlaneEndpoint clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty"`
 
-	// Network configuration for the cluster
-	// +optional
-	Network *ContaboNetworkSpec `json:"network,omitempty"`
-}
-
-// ContaboNetworkSpec defines network configuration for Contabo resources
-// Networks are referenced by name and their details (CIDR, datacenter) are discovered at runtime
-type ContaboNetworkSpec struct {
-	// PrivateNetworks is a list of private network names to use for the cluster
-	// The CIDR and datacenter information will be populated in the status after discovery
+	// PrivateNetworks specifies the network configuration for the machine.
 	// +optional
 	PrivateNetworks []ContaboPrivateNetworkSpec `json:"privateNetworks,omitempty"`
-}
-
-// ContaboPrivateNetworkSpec defines a private network configuration
-type ContaboPrivateNetworkSpec struct {
-	// Name of the private network to use (must exist in Contabo)
-	// +kubebuilder:validation:Required
-	Name string `json:"name"`
 }
 
 // ContaboClusterStatus defines the observed state of ContaboCluster.
@@ -61,9 +45,9 @@ type ContaboClusterStatus struct {
 	// +optional
 	Ready bool `json:"ready"`
 
-	// Network describes the cluster network configuration
+	// PrivateNetworkds contains the discovered information about private networks
 	// +optional
-	Network *ContaboNetworkStatus `json:"network,omitempty"`
+	PrivateNetworks []ContaboPrivateNetworkStatus `json:"privateNetworks,omitempty"`
 
 	// Conditions defines current service state of the ContaboCluster.
 	// +optional
@@ -74,50 +58,17 @@ type ContaboClusterStatus struct {
 	FailureDomains []clusterv1.FailureDomain `json:"failureDomains,omitempty"`
 }
 
-// ContaboNetworkStatus defines the network status discovered from Contabo
-type ContaboNetworkStatus struct {
-	// PrivateNetworks contains the discovered information about private networks
-	// +optional
-	PrivateNetworks []ContaboPrivateNetworkStatus `json:"privateNetworks,omitempty"`
+// ContaboPrivateNetworkSpec defines the desired state of a Contabo private network
+type ContaboPrivateNetworkSpec = CreatePrivateNetworkRequest
 
-	// DataCenter contains information about the datacenter where resources are located
-	// This is populated after instances are created and their datacenter is discovered
-	// +optional
-	DataCenter *ContaboDataCenterStatus `json:"dataCenter,omitempty"`
-}
-
-// ContaboPrivateNetworkStatus defines the status of a private network
-type ContaboPrivateNetworkStatus struct {
-	// Name of the private network
-	Name string `json:"name"`
-
-	// ID of the private network in Contabo
-	ID string `json:"id"`
-
-	// CIDR block of the private network (discovered from Contabo)
-	CIDR string `json:"cidr"`
-
-	// DataCenter where this private network is located
-	DataCenter string `json:"dataCenter"`
-
-	// Region where this private network is located
-	Region string `json:"region"`
-}
-
-// ContaboDataCenterStatus defines datacenter information
-type ContaboDataCenterStatus struct {
-	// Name of the datacenter (e.g., "European Union (Germany)")
-	Name string `json:"name"`
-
-	// Code of the datacenter (e.g., "EU")
-	Code string `json:"code"`
-}
+// ContaboPrivateNetworkStatus defines the observed state of a Contabo private network
+type ContaboPrivateNetworkStatus = PrivateNetworkResponse
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Cluster",type="string",JSONPath=".metadata.labels.cluster\\.x-k8s\\.io/cluster-name",description="Cluster to which this ContaboCluster belongs"
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.ready",description="Cluster infrastructure is ready"
-// +kubebuilder:printcolumn:name="VPC",type="string",JSONPath=".status.network.vpcId",description="VPC ID"
+// +kubebuilder:printcolumn:name="Private Networks",type="string[]",JSONPath=".status.privateNetworks[].name",description="Private Networks"
 // +kubebuilder:printcolumn:name="Endpoint",type="string",JSONPath=".spec.controlPlaneEndpoint.host",description="API Endpoint",priority=1
 // +kubebuilder:resource:path=contaboclusters,scope=Namespaced,categories=cluster-api
 // +kubebuilder:storageversion
@@ -136,7 +87,7 @@ type ContaboCluster struct {
 
 	// status defines the observed state of ContaboCluster
 	// +optional
-	Status ContaboClusterStatus `json:"status,omitempty,omitzero"`
+	Status *ContaboClusterStatus `json:"status,omitempty,omitzero"`
 }
 
 // +kubebuilder:object:root=true

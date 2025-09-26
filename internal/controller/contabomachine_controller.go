@@ -8,14 +8,7 @@ You may obtain a copy of the License at
     http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS 	// Wait for the instance to be ready
-	instance, err := r.waitForInstanceReady(ctx, stubInstance.InstanceId, "provisioning")
-	if err != nil {
-		return nil, fmt.Errorf("failed to wait for instance ready: %w", err)
-	}
-
-	return instance, nilIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+distributed under the License is distributed on an "AS WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
@@ -52,8 +45,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
-	contaboclient "github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/client"
-	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/models"
+	contaboclient "github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/v1.0.0/client"
+	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/v1.0.0/models"
 )
 
 // ContaboMachineReconciler reconciles a ContaboMachine object
@@ -357,13 +350,13 @@ func (r *ContaboMachineReconciler) reconcileInstance(ctx context.Context, machin
 		Reason: infrastructurev1beta2.InstanceProvisioningReason,
 	})
 
-	// Use standardized Ubuntu image for all cluster machines for consistency and security
-	defaultImage := DefaultUbuntuImageID
+	// Use the specified image or find default Ubuntu image
+	imageId := DefaultUbuntuImageID
 
 	createReq := &models.CreateInstanceRequest{
-		ImageId:     &defaultImage, // Always use Ubuntu 22.04 LTS for cluster nodes
-		ProductId:   &contaboMachine.Spec.InstanceType,
-		Region:      ConvertRegionToCreateInstanceRegion(contaboMachine.Spec.Region),
+		ImageId:     &imageId,
+		ProductId:   &contaboMachine.Spec.Instance,
+		Region:      ConvertRegionToCreateInstanceRegion(contaboCluster.Spec.Region),
 		DisplayName: &contaboMachine.Name, // Will be updated after creation with proper format
 		UserData:    &userData,
 		Period:      1, // Default period
@@ -420,6 +413,14 @@ func (r *ContaboMachineReconciler) reconcileInstance(ctx context.Context, machin
 	instance, err := r.waitForInstanceReady(ctx, createdInstance.InstanceId, "provisioning")
 	if err != nil {
 		return nil, fmt.Errorf("failed to wait for new instance: %w", err)
+	}
+
+	// Add private network capability
+	_, err = r.ContaboClient.UpgradeInstance(ctx, createdInstance.InstanceId, &models.UpgradeInstanceParams{}, models.UpgradeInstanceRequest{
+		PrivateNetworking: &models.PrivateNetworkingUpgradeRequest{},
+	})
+	if err != nil {
+		log.Error(err, "failed to add private networking to instance, continuing anyway", "instanceId", createdInstance.InstanceId)
 	}
 
 	return instance, nil
@@ -507,11 +508,17 @@ func (r *ContaboMachineReconciler) findAvailableInstance(ctx context.Context, co
 func (r *ContaboMachineReconciler) reinstallInstance(ctx context.Context, instanceID int64, contaboMachine *infrastructurev1beta2.ContaboMachine, userData string) error {
 	log := logf.FromContext(ctx)
 
-	log.Info("Reinstalling instance with Ubuntu image", "instanceId", instanceID, "imageId", DefaultUbuntuImageID)
+	// Use the specified image or default to Ubuntu
+	imageId := contaboMachine.Spec.Image
+	if imageId == "" {
+		imageId = DefaultUbuntuImageID
+	}
+
+	log.Info("Reinstalling instance", "instanceId", instanceID, "imageId", imageId)
 
 	// Prepare reinstall request
 	reinstallReq := &models.ReinstallInstanceRequest{
-		ImageId:  DefaultUbuntuImageID,
+		ImageId:  imageId,
 		UserData: &userData,
 	}
 

@@ -31,48 +31,11 @@ type ContaboMachineSpec struct {
 	// +optional
 	ProviderID *string `json:"providerID,omitempty"`
 
-	// InstanceType is the Contabo instance type for the machine.
-	// +kubebuilder:validation:Required
-	InstanceType string `json:"instanceType"`
+	// Instance is the type of instance to create.
+	Instance ContaboInstanceSpec `json:"instance"`
 
-	// Region is the Contabo region where the machine will be created.
-	// +kubebuilder:validation:Required
-	Region string `json:"region"`
-
-	// SSHKeys is a list of SSH key names to be added to the machine.
-	// +optional
-	SSHKeys []string `json:"sshKeys,omitempty"`
-
-	// UserData is the cloud-init user data to use for the machine.
-	// +optional
-	UserData *string `json:"userData,omitempty"`
-
-	// AdditionalMetadata is additional metadata to be added to the machine.
-	// +optional
-	AdditionalMetadata map[string]string `json:"additionalMetadata,omitempty"`
-
-	// AdditionalTags is additional tags to be added to the machine.
-	// +optional
-	AdditionalTags map[string]string `json:"additionalTags,omitempty"`
-
-	// Network configuration for the machine
-	// +optional
-	Network *ContaboMachineNetworkSpec `json:"network,omitempty"`
-}
-
-// ContaboMachineNetworkSpec defines network configuration for a machine
-type ContaboMachineNetworkSpec struct {
-	// SubnetName is the name of the subnet to place the machine in
-	// +optional
-	SubnetName *string `json:"subnetName,omitempty"`
-
-	// PrivateIP is the private IP address to assign to the machine
-	// +optional
-	PrivateIP *string `json:"privateIP,omitempty"`
-
-	// PublicIP specifies whether to assign a public IP to the machine
-	// +optional
-	PublicIP *bool `json:"publicIP,omitempty"`
+	// PrivateNetworks specifies the network configuration for the machine.
+	PrivateNetworks []ContaboPrivateNetworkSpec `json:"privateNetworks,omitempty"`
 }
 
 // ContaboMachineStatus defines the observed state of ContaboMachine.
@@ -81,13 +44,12 @@ type ContaboMachineStatus struct {
 	// +optional
 	Ready bool `json:"ready"`
 
-	// InstanceState is the state of the Contabo instance.
-	// +optional
-	InstanceState *ContaboMachineInstanceState `json:"instanceState,omitempty"`
+	// Instance is the current state of the Contabo instance.
+	Instance *ContaboInstanceStatus `json:"instance,omitempty"`
 
-	// Network describes the machine network configuration
+	// Privatenetworks contains the discovered information about private networks
 	// +optional
-	Network *ContaboMachineNetworkStatus `json:"network,omitempty"`
+	PrivateNetworks []ContaboPrivateNetworkStatus `json:"privateNetworks,omitempty"`
 
 	// Addresses contains the Contabo instance associated addresses.
 	Addresses []clusterv1.MachineAddress `json:"addresses,omitempty"`
@@ -135,36 +97,11 @@ type ContaboMachineStatus struct {
 	FailureMessage *string `json:"failureMessage,omitempty"`
 }
 
-// ContaboMachineInstanceState describes the instance state
-type ContaboMachineInstanceState string
+// ContaboInstanceSpec defines the desired state of a Contabo instance
+type ContaboInstanceSpec = CreateInstanceRequest
 
-const (
-	// ContaboMachineInstanceStateRunning represents a running instance
-	ContaboMachineInstanceStateRunning ContaboMachineInstanceState = "running"
-	// ContaboMachineInstanceStatePending represents a pending instance
-	ContaboMachineInstanceStatePending ContaboMachineInstanceState = "pending"
-	// ContaboMachineInstanceStateStopped represents a stopped instance
-	ContaboMachineInstanceStateStopped ContaboMachineInstanceState = "stopped"
-	// ContaboMachineInstanceStateTerminated represents a terminated instance
-	ContaboMachineInstanceStateTerminated ContaboMachineInstanceState = "terminated"
-	// ContaboMachineInstanceStateUnknown represents an unknown instance state
-	ContaboMachineInstanceStateUnknown ContaboMachineInstanceState = "unknown"
-)
-
-// ContaboMachineNetworkStatus defines the network status
-type ContaboMachineNetworkStatus struct {
-	// PrivateIP is the private IP address of the machine
-	// +optional
-	PrivateIP *string `json:"privateIP,omitempty"`
-
-	// PublicIP is the public IP address of the machine
-	// +optional
-	PublicIP *string `json:"publicIP,omitempty"`
-
-	// SubnetID is the ID of the subnet the machine is in
-	// +optional
-	SubnetID *string `json:"subnetID,omitempty"`
-}
+// ContaboInstanceStatus defines the observed state of a Contabo instance
+type ContaboInstanceStatus = InstanceResponse
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status

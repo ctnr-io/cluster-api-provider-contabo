@@ -25,10 +25,10 @@ spec:
       jsonPath: .status.ready
       name: Ready
       type: string
-    - description: VPC ID
-      jsonPath: .status.network.vpcId
-      name: VPC
-      type: string
+    - description: Private Networks
+      jsonPath: .status.privateNetworks[].name
+      name: Private Networks
+      type: string[]
     - description: API Endpoint
       jsonPath: .spec.controlPlaneEndpoint.host
       name: Endpoint
@@ -76,26 +76,29 @@ spec:
                     minimum: 1
                     type: integer
                 type: object
-              network:
-                description: Network configuration for the cluster
-                properties:
-                  privateNetworks:
-                    description: |-
-                      PrivateNetworks is a list of private network names to use for the cluster
-                      The CIDR and datacenter information will be populated in the status after discovery
-                    items:
-                      description: ContaboPrivateNetworkSpec defines a private network
-                        configuration
-                      properties:
-                        name:
-                          description: Name of the private network to use (must exist
-                            in Contabo)
-                          type: string
-                      required:
-                      - name
-                      type: object
-                    type: array
-                type: object
+              privateNetworks:
+                description: PrivateNetworks specifies the network configuration for
+                  the machine.
+                items:
+                  description: CreatePrivateNetworkRequest defines model for CreatePrivateNetworkRequest.
+                  properties:
+                    description:
+                      description: Description The description of the Private Network.
+                        There is a limit of 255 characters per Private Network description.
+                      type: string
+                    name:
+                      description: Name The name of the Private Network. It may contain
+                        letters, numbers, colons, dashes, and underscores. There is
+                        a limit of 255 characters per Private Network name.
+                      type: string
+                    region:
+                      description: Region Region where the Private Network should
+                        be located. Default is `EU`
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
               region:
                 description: Region is the Contabo region where the cluster will be
                   deployed
@@ -190,57 +193,170 @@ spec:
                   - name
                   type: object
                 type: array
-              network:
-                description: Network describes the cluster network configuration
-                properties:
-                  dataCenter:
-                    description: |-
-                      DataCenter contains information about the datacenter where resources are located
-                      This is populated after instances are created and their datacenter is discovered
-                    properties:
-                      code:
-                        description: Code of the datacenter (e.g., "EU")
-                        type: string
-                      name:
-                        description: Name of the datacenter (e.g., "European Union
-                          (Germany)")
-                        type: string
-                    required:
-                    - code
-                    - name
-                    type: object
-                  privateNetworks:
-                    description: PrivateNetworks contains the discovered information
-                      about private networks
-                    items:
-                      description: ContaboPrivateNetworkStatus defines the status
-                        of a private network
-                      properties:
-                        cidr:
-                          description: CIDR block of the private network (discovered
-                            from Contabo)
-                          type: string
-                        dataCenter:
-                          description: DataCenter where this private network is located
-                          type: string
-                        id:
-                          description: ID of the private network in Contabo
-                          type: string
-                        name:
-                          description: Name of the private network
-                          type: string
-                        region:
-                          description: Region where this private network is located
-                          type: string
-                      required:
-                      - cidr
-                      - dataCenter
-                      - id
-                      - name
-                      - region
-                      type: object
-                    type: array
-                type: object
+              privateNetworks:
+                description: PrivateNetworkds contains the discovered information
+                  about private networks
+                items:
+                  description: PrivateNetworkResponse defines model for PrivateNetworkResponse.
+                  properties:
+                    availableIps:
+                      description: AvailableIps The total available IPs of the Private
+                        Network
+                      format: int64
+                      type: integer
+                    cidr:
+                      description: Cidr The cidr range of the Private Network
+                      type: string
+                    createdDate:
+                      description: CreatedDate The creation date of the Private Network
+                      format: int64
+                      type: integer
+                    customerId:
+                      description: CustomerId Your customer number
+                      type: string
+                    dataCenter:
+                      description: DataCenter The data center where your Private Network
+                        is located
+                      type: string
+                    description:
+                      description: Description The description of the Private Network
+                      type: string
+                    instances:
+                      items:
+                        description: Instances defines model for Instances.
+                        properties:
+                          displayName:
+                            description: DisplayName Instance display name
+                            type: string
+                          errorMessage:
+                            description: ErrorMessage Message in case of an error.
+                            type: string
+                          instanceId:
+                            description: InstanceId Instance id
+                            format: int64
+                            type: integer
+                          ipConfig:
+                            description: IpConfig defines model for IpConfig.
+                            properties:
+                              v4:
+                                description: IpV4 defines model for IpV4.
+                                properties:
+                                  gateway:
+                                    description: Gateway Gateway
+                                    type: string
+                                  ip:
+                                    description: Ip IP Address
+                                    type: string
+                                  netmaskCidr:
+                                    description: NetmaskCidr Netmask CIDR
+                                    format: int32
+                                    type: integer
+                                required:
+                                - gateway
+                                - ip
+                                - netmaskCidr
+                                type: object
+                              v6:
+                                description: IpV6 defines model for IpV6.
+                                properties:
+                                  gateway:
+                                    description: Gateway Gateway
+                                    type: string
+                                  ip:
+                                    description: Ip IP Address
+                                    type: string
+                                  netmaskCidr:
+                                    description: NetmaskCidr Netmask CIDR
+                                    format: int32
+                                    type: integer
+                                required:
+                                - gateway
+                                - ip
+                                - netmaskCidr
+                                type: object
+                            required:
+                            - v4
+                            - v6
+                            type: object
+                          name:
+                            description: Name Instance name
+                            type: string
+                          privateIpConfig:
+                            description: PrivateIpConfig defines model for PrivateIpConfig.
+                            properties:
+                              v4:
+                                items:
+                                  description: IpV4 defines model for IpV4.
+                                  properties:
+                                    gateway:
+                                      description: Gateway Gateway
+                                      type: string
+                                    ip:
+                                      description: Ip IP Address
+                                      type: string
+                                    netmaskCidr:
+                                      description: NetmaskCidr Netmask CIDR
+                                      format: int32
+                                      type: integer
+                                  required:
+                                  - gateway
+                                  - ip
+                                  - netmaskCidr
+                                  type: object
+                                type: array
+                            required:
+                            - v4
+                            type: object
+                          productId:
+                            description: ProductId Product id
+                            type: string
+                          status:
+                            description: Status State of the instance in the Private
+                              Network
+                            type: string
+                        required:
+                        - displayName
+                        - instanceId
+                        - ipConfig
+                        - name
+                        - privateIpConfig
+                        - productId
+                        - status
+                        type: object
+                      type: array
+                    name:
+                      description: Name The name of the Private Network
+                      type: string
+                    privateNetworkId:
+                      description: PrivateNetworkId Private Network's id
+                      format: int64
+                      type: integer
+                    region:
+                      description: Region The slug of the region where your Private
+                        Network is located
+                      type: string
+                    regionName:
+                      description: RegionName The region where your Private Network
+                        is located
+                      type: string
+                    tenantId:
+                      description: TenantId Your customer tenant id
+                      type: string
+                  required:
+                  - availableIps
+                  - cidr
+                  - createdDate
+                  - customerId
+                  - dataCenter
+                  - description
+                  - instances
+                  - name
+                  - privateNetworkId
+                  - region
+                  - regionName
+                  - tenantId
+                  type: object
+                type: array
               ready:
                 description: Ready denotes that the cluster (infrastructure) is ready.
                 type: boolean

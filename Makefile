@@ -53,6 +53,10 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 generate-api-client: ## Generate Contabo API client from OpenAPI specification.
 	cd pkg/contabo && go generate
 
+.PHONT: generate-api-models-derive
+generate-api-models-derive: goderive ## Generate Contabo API models with additional methods using goderive.
+	$(GODERIVE) ./pkg/contabo/v1.0.0/models/models.go
+
 .PHONY: fmt
 fmt: ## Run go fmt against code.
 	go fmt ./...
@@ -204,6 +208,7 @@ KUBECTL ?= kubectl
 KIND ?= kind
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
+GODERIVE ?= $(LOCALBIN)/goderive
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 CLUSTERCTL ?= $(LOCALBIN)/clusterctl
@@ -211,6 +216,7 @@ CLUSTERCTL ?= $(LOCALBIN)/clusterctl
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.6.0
 CONTROLLER_TOOLS_VERSION ?= v0.18.0
+GODERIVE_VERSION ?= latest
 #ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
 ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller-runtime | awk -F'[v.]' '{printf "release-%d.%d", $$2, $$3}')
 #ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
@@ -227,6 +233,11 @@ $(KUSTOMIZE): $(LOCALBIN)
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
 $(CONTROLLER_GEN): $(LOCALBIN)
 	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
+
+.PHNOY: goderive
+goderive: $(GODERIVE) ## Download goderive locally if necessary.
+$(GODERIVE): $(LOCALBIN)
+	$(call go-install-tool,$(GODERIVE),github.com/awalterschulze/goderive,$(GODERIVE_VERSION))
 
 .PHONY: setup-envtest
 setup-envtest: envtest ## Download the binaries required for ENVTEST in the local bin directory.

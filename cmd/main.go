@@ -43,8 +43,8 @@ import (
 
 	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
 	"github.com/ctnr-io/cluster-api-provider-contabo/internal/controller"
-	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/auth"
-	contaboclient "github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/client"
+	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/v1.0.0/auth"
+	contaboclient "github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/v1.0.0/client"
 	// +kubebuilder:scaffold:imports
 )
 

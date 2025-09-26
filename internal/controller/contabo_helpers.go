@@ -22,7 +22,7 @@ import (
 	"strings"
 
 	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
-	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/models"
+	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/v1.0.0/models"
 	"github.com/google/uuid"
 )
 
@@ -162,12 +162,29 @@ func BuildInstanceDisplayName(cluster *infrastructurev1beta2.ContaboCluster, mac
 // BuildInstanceDisplayNameWithState creates a display name including instance state
 // Format: "<instance-id>-<state>-<cluster-id>" (shortened for space)
 func BuildInstanceDisplayNameWithState(instanceID int64, state, clusterID string) string {
-	if state != "" && clusterID != "" {
-		return fmt.Sprintf("%d-%s-%s", instanceID, state, clusterID)
-	} else if state != "" {
-		return fmt.Sprintf("%d-%s", instanceID, state)
+	stateShort := mapStateToShort(state)
+	if stateShort != "" && clusterID != "" {
+		return fmt.Sprintf("%d-%s-%s", instanceID, stateShort, clusterID)
+	} else if stateShort != "" {
+		return fmt.Sprintf("%d-%s", instanceID, stateShort)
 	}
 	return fmt.Sprintf("%d", instanceID)
+}
+
+// mapStateToShort converts full state names to short versions for display names
+func mapStateToShort(state string) string {
+	switch state {
+	case StateAvailable:
+		return stateAvailable
+	case StateProvisioning:
+		return stateProvisioning
+	case StateClusterBound:
+		return stateBound
+	case StateError:
+		return stateError
+	default:
+		return stateAvailable
+	}
 }
 
 // GetClusterNameFromDisplayName extracts cluster name from display name

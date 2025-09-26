@@ -54,59 +54,180 @@ spec:
                   spec:
                     description: ContaboMachineSpec defines the desired state of ContaboMachine
                     properties:
-                      additionalMetadata:
-                        additionalProperties:
-                          type: string
-                        description: AdditionalMetadata is additional metadata to
-                          be added to the machine.
-                        type: object
-                      additionalTags:
-                        additionalProperties:
-                          type: string
-                        description: AdditionalTags is additional tags to be added
-                          to the machine.
-                        type: object
-                      instanceType:
-                        description: InstanceType is the Contabo instance type for
-                          the machine.
-                        type: string
-                      network:
-                        description: Network configuration for the machine
+                      instance:
+                        description: Instance is the type of instance to create.
                         properties:
-                          privateIP:
-                            description: PrivateIP is the private IP address to assign
-                              to the machine
+                          addOns:
+                            description: AddOns Set attributes in the addons object
+                              for the corresponding ones that need to be added to
+                              the instance
+                            properties:
+                              additionalIps:
+                                additionalProperties:
+                                  type: string
+                                description: AdditionalIps Set this attribute if you
+                                  want to upgrade your instance with the Additional
+                                  IPs addon. Please provide an empty object for the
+                                  time being as value. There will be more configuration
+                                  possible in the future.
+                                type: object
+                              addonsIds:
+                                items:
+                                  description: AddOnRequest defines model for AddOnRequest.
+                                  properties:
+                                    id:
+                                      description: Id Id of the Addon. Please refer
+                                        to list [here](https://contabo.com/en/product-list/?show_ids=true).
+                                      format: int64
+                                      type: integer
+                                    quantity:
+                                      description: Quantity The number of Addons you
+                                        wish to aquire.
+                                      format: int64
+                                      type: integer
+                                  required:
+                                  - id
+                                  - quantity
+                                  type: object
+                                type: array
+                              backup:
+                                additionalProperties:
+                                  type: string
+                                description: Backup Set this attribute if you want
+                                  to upgrade your instance with the Automated backup
+                                  addon.     Please provide an empty object for the
+                                  time being as value. There will be more configuration
+                                  possible     in the future.
+                                type: object
+                              customImage:
+                                additionalProperties:
+                                  type: string
+                                description: CustomImage Set this attribute if you
+                                  want to upgrade your instance with the Custom Images
+                                  addon.   Please provide an empty object for the
+                                  time being as value. There will be more configuration
+                                  possible   in the future.
+                                type: object
+                              extraStorage:
+                                description: ExtraStorage Set this attribute if you
+                                  want to upgrade your instance with the Extra Storage
+                                  addon.
+                                properties:
+                                  nvme:
+                                    description: Nvme Specify the size in TB and the
+                                      quantity
+                                    items:
+                                      type: string
+                                    type: array
+                                  ssd:
+                                    description: Ssd Specify the size in TB and the
+                                      quantity
+                                    items:
+                                      type: string
+                                    type: array
+                                type: object
+                              privateNetworking:
+                                additionalProperties:
+                                  type: string
+                                description: PrivateNetworking Set this attribute
+                                  if you want to upgrade your instance with the Private
+                                  Networking addon.   Please provide an empty object
+                                  for the time being as value. There will be more
+                                  configuration possible   in the future.
+                                type: object
+                            type: object
+                          applicationId:
+                            description: ApplicationId Application ID
                             type: string
-                          publicIP:
-                            description: PublicIP specifies whether to assign a public
-                              IP to the machine
-                            type: boolean
-                          subnetName:
-                            description: SubnetName is the name of the subnet to place
-                              the machine in
+                          defaultUser:
+                            description: DefaultUser Default user name created for
+                              login during (re-)installation with administrative privileges.
+                              Allowed values for Linux/BSD are `admin` (use sudo to
+                              apply administrative privileges like root) or `root`.
+                              Allowed values for Windows are `admin` (has administrative
+                              privileges like administrator) or `administrator`.
                             type: string
+                          displayName:
+                            description: DisplayName The display name of the instance
+                            type: string
+                          imageId:
+                            description: ImageId ImageId to be used to setup the compute
+                              instance. Default is Ubuntu 22.04
+                            type: string
+                          license:
+                            description: License Additional licence in order to enhance
+                              your chosen product, mainly needed for software licenses
+                              on your product (not needed for windows).
+                            type: string
+                          period:
+                            description: 'Period Initial contract period in months.
+                              Available periods are: 1, 3, 6 and 12 months. Default
+                              to 1 month'
+                            format: int64
+                            type: integer
+                          productId:
+                            description: ProductId Default is V92
+                            type: string
+                          region:
+                            description: Region Instance Region where the compute
+                              instance should be located. Default is EU
+                            type: string
+                          rootPassword:
+                            description: RootPassword `secretId` of the password for
+                              the `defaultUser` with administrator/root privileges.
+                              For Linux/BSD please use SSH, for Windows RDP. Please
+                              refer to Secrets Management API.
+                            format: int64
+                            type: integer
+                          sshKeys:
+                            description: SshKeys Array of `secretId`s of public SSH
+                              keys for logging into as `defaultUser` with administrator/root
+                              privileges. Applies to Linux/BSD systems. Please refer
+                              to Secrets Management API.
+                            items:
+                              format: int64
+                              type: integer
+                            type: array
+                          userData:
+                            description: UserData [Cloud-Init](https://cloud-init.io/)
+                              Config in order to customize during start of compute
+                              instance.
+                            type: string
+                        required:
+                        - period
                         type: object
+                      privateNetworks:
+                        description: PrivateNetworks specifies the network configuration
+                          for the machine.
+                        items:
+                          description: CreatePrivateNetworkRequest defines model for
+                            CreatePrivateNetworkRequest.
+                          properties:
+                            description:
+                              description: Description The description of the Private
+                                Network. There is a limit of 255 characters per Private
+                                Network description.
+                              type: string
+                            name:
+                              description: Name The name of the Private Network. It
+                                may contain letters, numbers, colons, dashes, and
+                                underscores. There is a limit of 255 characters per
+                                Private Network name.
+                              type: string
+                            region:
+                              description: Region Region where the Private Network
+                                should be located. Default is `EU`
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
                       providerID:
                         description: ProviderID is the unique identifier as specified
                           by the cloud provider.
                         type: string
-                      region:
-                        description: Region is the Contabo region where the machine
-                          will be created.
-                        type: string
-                      sshKeys:
-                        description: SSHKeys is a list of SSH key names to be added
-                          to the machine.
-                        items:
-                          type: string
-                        type: array
-                      userData:
-                        description: UserData is the cloud-init user data to use for
-                          the machine.
-                        type: string
                     required:
-                    - instanceType
-                    - region
+                    - instance
                     type: object
                 required:
                 - spec

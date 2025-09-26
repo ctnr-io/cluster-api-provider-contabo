@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"strings"
 
-	models "github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/models"
+	models "github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/v1.0.0/models"
 	"github.com/oapi-codegen/runtime"
 )
 
