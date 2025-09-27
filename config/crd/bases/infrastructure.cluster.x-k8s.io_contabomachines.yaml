@@ -224,6 +224,34 @@ spec:
                 description: ProviderID is the unique identifier as specified by the
                   cloud provider.
                 type: string
+              secrets:
+                description: Secrets references the secret with user data to configure
+                  the machine.
+                items:
+                  description: CreateSecretRequest defines model for CreateSecretRequest.
+                  properties:
+                    name:
+                      description: Name The name of the secret that will keep the
+                        password
+                      type: string
+                    type:
+                      description: Type The type of the secret. Can be `password`
+                        or `ssh`
+                      type: string
+                    value:
+                      description: 'Value The secret value that needs to be saved.
+                        In case of a password it must match a pattern with at least
+                        one upper and lower case character and either one number with
+                        two special characters `!@#$^&*?_~` or at least three numbers
+                        with one special character `!@#$^&*?_~`. This is expressed
+                        in the following regular expression: `^((?=.*?[A-Z]{1,})(?=.*?[a-z]{1,}))(((?=(?:[^d]*d){1})(?=([^^&*?_~]*[!@#$^&*?_~]){2,}))|((?=(?:[^d]*d){3})(?=.*?[!@#$^&*?_~]+))).{8,}$`'
+                      type: string
+                  required:
+                  - name
+                  - type
+                  - value
+                  type: object
+                type: array
             required:
             - instance
             type: object
@@ -354,14 +382,90 @@ spec:
               instance:
                 description: Instance is the current state of the Contabo instance.
                 properties:
+                  addOns:
+                    items:
+                      description: AddOnResponse defines model for AddOnResponse.
+                      properties:
+                        id:
+                          description: Id Id of the Addon. Please refer to list [here](https://contabo.com/en/product-list/?show_ids=true).
+                          format: int64
+                          type: integer
+                        quantity:
+                          description: Quantity The number of Addons you wish to aquire.
+                          format: int64
+                          type: integer
+                      required:
+                      - id
+                      - quantity
+                      type: object
+                    type: array
+                  additionalIps:
+                    items:
+                      description: AdditionalIp defines model for AdditionalIp.
+                      properties:
+                        v4:
+                          description: IpV4 defines model for IpV4.
+                          properties:
+                            gateway:
+                              description: Gateway Gateway
+                              type: string
+                            ip:
+                              description: Ip IP Address
+                              type: string
+                            netmaskCidr:
+                              description: NetmaskCidr Netmask CIDR
+                              format: int32
+                              type: integer
+                          required:
+                          - gateway
+                          - ip
+                          - netmaskCidr
+                          type: object
+                      required:
+                      - v4
+                      type: object
+                    type: array
+                  cancelDate:
+                    description: CancelDate The date on which the instance will be
+                      cancelled
+                    type: string
+                  cpuCores:
+                    description: CpuCores CPU core count
+                    format: int64
+                    type: integer
+                  createdDate:
+                    description: CreatedDate The creation date for the instance
+                    format: int64
+                    type: integer
+                  customerId:
+                    description: CustomerId Customer ID
+                    type: string
+                  dataCenter:
+                    description: DataCenter The data center where your Private Network
+                      is located
+                    type: string
+                  defaultUser:
+                    description: DefaultUser Default user name created for login during
+                      (re-)installation with administrative privileges. Allowed values
+                      for Linux/BSD are `admin` (use sudo to apply administrative
+                      privileges like root) or `root`. Allowed values for Windows
+                      are `admin` (has administrative privileges like administrator)
+                      or `administrator`.
+                    type: string
+                  diskMb:
+                    description: DiskMb Image Disk size in MB
+                    type: number
                   displayName:
                     description: DisplayName Instance display name
                     type: string
                   errorMessage:
                     description: ErrorMessage Message in case of an error.
                     type: string
+                  imageId:
+                    description: ImageId Image's id
+                    type: string
                   instanceId:
-                    description: InstanceId Instance id
+                    description: InstanceId Instance ID
                     format: int64
                     type: integer
                   ipConfig:
@@ -407,53 +511,93 @@ spec:
                     - v4
                     - v6
                     type: object
+                  macAddress:
+                    description: MacAddress MAC Address
+                    type: string
                   name:
-                    description: Name Instance name
+                    description: Name Instance Name
                     type: string
-                  privateIpConfig:
-                    description: PrivateIpConfig defines model for PrivateIpConfig.
-                    properties:
-                      v4:
-                        items:
-                          description: IpV4 defines model for IpV4.
-                          properties:
-                            gateway:
-                              description: Gateway Gateway
-                              type: string
-                            ip:
-                              description: Ip IP Address
-                              type: string
-                            netmaskCidr:
-                              description: NetmaskCidr Netmask CIDR
-                              format: int32
-                              type: integer
-                          required:
-                          - gateway
-                          - ip
-                          - netmaskCidr
-                          type: object
-                        type: array
-                    required:
-                    - v4
-                    type: object
+                  osType:
+                    description: OsType Type of operating system (OS)
+                    type: string
                   productId:
-                    description: ProductId Product id
+                    description: ProductId Product ID
                     type: string
+                  productName:
+                    description: ProductName Instance's Product Name
+                    type: string
+                  productType:
+                    description: ProductType Instance's category depending on Product
+                      Id
+                    type: string
+                  ramMb:
+                    description: RamMb Image RAM size in MB
+                    type: number
+                  region:
+                    description: Region Instance region where the compute instance
+                      should be located.
+                    type: string
+                  regionName:
+                    description: RegionName The name of the region where the instance
+                      is located.
+                    type: string
+                  sshKeys:
+                    description: SshKeys Array of `secretId`s of public SSH keys for
+                      logging into as `defaultUser` with administrator/root privileges.
+                      Applies to Linux/BSD systems. Please refer to Secrets Management
+                      API.
+                    items:
+                      format: int64
+                      type: integer
+                    type: array
                   status:
-                    description: Status State of the instance in the Private Network
+                    description: Status Instance's status
                     type: string
+                  tenantId:
+                    description: TenantId Your customer tenant id
+                    type: string
+                  vHostId:
+                    description: VHostId ID of host system
+                    format: int64
+                    type: integer
+                  vHostName:
+                    description: VHostName Name of host system
+                    type: string
+                  vHostNumber:
+                    description: VHostNumber Number of host system
+                    format: int64
+                    type: integer
                 required:
+                - addOns
+                - additionalIps
+                - cancelDate
+                - cpuCores
+                - createdDate
+                - customerId
+                - dataCenter
+                - diskMb
                 - displayName
+                - imageId
                 - instanceId
                 - ipConfig
+                - macAddress
                 - name
-                - privateIpConfig
+                - osType
                 - productId
+                - productName
+                - productType
+                - ramMb
+                - region
+                - regionName
+                - sshKeys
                 - status
+                - tenantId
+                - vHostId
+                - vHostName
+                - vHostNumber
                 type: object
               privateNetworks:
-                description: Privatenetworks contains the discovered information about
-                  private networks
+                description: PrivateNetworks to create and/or attach to the instance.
                 items:
                   description: PrivateNetworkResponse defines model for PrivateNetworkResponse.
                   properties:
@@ -618,6 +762,50 @@ spec:
               ready:
                 description: Ready is true when the provider resource is ready.
                 type: boolean
+              secrets:
+                description: Secrets to create and/or attach to the instance.
+                items:
+                  description: SecretResponse defines model for SecretResponse.
+                  properties:
+                    createdAt:
+                      description: CreatedAt The creation date for the secret
+                      format: int64
+                      type: integer
+                    customerId:
+                      description: CustomerId Your Customer number
+                      type: string
+                    name:
+                      description: Name The name assigned to the password/ssh
+                      type: string
+                    secretId:
+                      description: SecretId Secret's id
+                      type: number
+                    tenantId:
+                      description: TenantId Your customer tenant id
+                      type: string
+                    type:
+                      description: Type The type of the secret. This will be available
+                        only when retrieving secrets
+                      type: string
+                    updatedAt:
+                      description: UpdatedAt The last update date for the secret
+                      format: int64
+                      type: integer
+                    value:
+                      description: Value The value of the secret. This will be available
+                        only when retrieving a single secret
+                      type: string
+                  required:
+                  - createdAt
+                  - customerId
+                  - name
+                  - secretId
+                  - tenantId
+                  - type
+                  - updatedAt
+                  - value
+                  type: object
+                type: array
             type: object
         required:
         - spec

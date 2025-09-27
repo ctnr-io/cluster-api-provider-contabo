@@ -572,7 +572,7 @@ type AssignmentAuditResponse struct {
 	TenantId string `json:"tenantId"`
 
 	// Timestamp Audit creation date
-	Timestamp uint64 `json:"timestamp"`
+	Timestamp int64 `json:"timestamp"`
 
 	// TraceId Trace ID
 	TraceId string `json:"traceId"`
@@ -641,7 +641,7 @@ type Backup = map[string]string
 // CancelInstanceRequest defines model for CancelInstanceRequest.
 type CancelInstanceRequest struct {
 	// CancelDate Date of cancellation
-	CancelDate *uint64 `json:"cancelDate,omitempty"`
+	CancelDate *int64 `json:"cancelDate,omitempty"`
 }
 
 // CancelInstanceResponse defines model for CancelInstanceResponse.
@@ -668,7 +668,7 @@ type CancelInstanceResponseData struct {
 // CancelObjectStorageRequest defines model for CancelObjectStorageRequest.
 type CancelObjectStorageRequest struct {
 	// CancelDate Date of cancellation
-	CancelDate *uint64 `json:"cancelDate,omitempty"`
+	CancelDate *int64 `json:"cancelDate,omitempty"`
 }
 
 // CancelObjectStorageResponse defines model for CancelObjectStorageResponse.
@@ -783,7 +783,7 @@ type CreateCustomImageResponseData struct {
 type CreateInstanceAddons struct {
 	// AdditionalIps Set this attribute if you want to upgrade your instance with the Additional IPs addon. Please provide an empty object for the time being as value. There will be more configuration possible in the future.
 	AdditionalIps *map[string]string `json:"additionalIps,omitempty"`
-	AddonsIds     *[]AddOnRequest         `json:"addonsIds,omitempty"`
+	AddonsIds     *[]AddOnRequest    `json:"addonsIds,omitempty"`
 
 	// Backup Set this attribute if you want to upgrade your instance with the Automated backup addon.     Please provide an empty object for the time being as value. There will be more configuration possible     in the future.
 	Backup *map[string]string `json:"backup,omitempty"`
@@ -857,7 +857,7 @@ type CreateInstanceResponseData struct {
 	AddOns []AddOnResponse `json:"addOns"`
 
 	// CreatedDate Creation date for instance
-	CreatedDate uint64 `json:"createdDate"`
+	CreatedDate int64 `json:"createdDate"`
 
 	// CustomerId Your customer number
 	CustomerId string `json:"customerId"`
@@ -917,7 +917,7 @@ type CreateObjectStorageResponseData struct {
 	CancelDate string `json:"cancelDate"`
 
 	// CreatedDate Creation date for object storage.
-	CreatedDate uint64 `json:"createdDate"`
+	CreatedDate int64 `json:"createdDate"`
 
 	// CustomerId Your customer number
 	CustomerId string `json:"customerId"`
@@ -1364,7 +1364,7 @@ type ImageAuditResponseData struct {
 	TenantId string `json:"tenantId"`
 
 	// Timestamp When the change took place.
-	Timestamp uint64 `json:"timestamp"`
+	Timestamp int64 `json:"timestamp"`
 
 	// TraceId The traceId of the API call which led to the change.
 	TraceId string `json:"traceId"`
@@ -1379,7 +1379,7 @@ type ImageAuditResponseDataAction string
 // ImageResponse defines model for ImageResponse.
 type ImageResponse struct {
 	// CreationDate The creation date time for the image
-	CreationDate uint64 `json:"creationDate"`
+	CreationDate int64 `json:"creationDate"`
 
 	// CustomerId Customer ID
 	CustomerId string `json:"customerId"`
@@ -1397,7 +1397,7 @@ type ImageResponse struct {
 	ImageId string `json:"imageId"`
 
 	// LastModifiedDate The last modified date time for the image
-	LastModifiedDate uint64 `json:"lastModifiedDate"`
+	LastModifiedDate int64 `json:"lastModifiedDate"`
 
 	// Name Image Name
 	Name string `json:"name"`
@@ -1499,7 +1499,7 @@ type InstanceResponse struct {
 	CpuCores int64 `json:"cpuCores"`
 
 	// CreatedDate The creation date for the instance
-	CreatedDate uint64 `json:"createdDate"`
+	CreatedDate int64 `json:"createdDate"`
 
 	// CustomerId Customer ID
 	CustomerId string `json:"customerId"`
@@ -1718,7 +1718,7 @@ type InstancesActionsAuditResponse struct {
 	TenantId string `json:"tenantId"`
 
 	// Timestamp When the change took place.
-	Timestamp uint64 `json:"timestamp"`
+	Timestamp int64 `json:"timestamp"`
 
 	// TraceId The traceId of the API call which led to the change.
 	TraceId string `json:"traceId"`
@@ -1769,7 +1769,7 @@ type InstancesAuditResponse struct {
 	TenantId string `json:"tenantId"`
 
 	// Timestamp When the change took place.
-	Timestamp uint64 `json:"timestamp"`
+	Timestamp int64 `json:"timestamp"`
 
 	// TraceId The traceId of the API call which led to the change.
 	TraceId string `json:"traceId"`
@@ -1913,7 +1913,7 @@ type ListImageResponse struct {
 // ListImageResponseData defines model for ListImageResponseData.
 type ListImageResponseData struct {
 	// CreationDate The creation date time for the image
-	CreationDate uint64 `json:"creationDate"`
+	CreationDate int64 `json:"creationDate"`
 
 	// CustomerId Customer ID
 	CustomerId string `json:"customerId"`
@@ -1931,7 +1931,7 @@ type ListImageResponseData struct {
 	ImageId string `json:"imageId"`
 
 	// LastModifiedDate The last modified date time for the image
-	LastModifiedDate uint64 `json:"lastModifiedDate"`
+	LastModifiedDate int64 `json:"lastModifiedDate"`
 
 	// Name Image Name
 	Name string `json:"name"`
@@ -2009,7 +2009,7 @@ type ListInstancesResponseData struct {
 	CpuCores int64 `json:"cpuCores"`
 
 	// CreatedDate The creation date for the instance
-	CreatedDate uint64 `json:"createdDate"`
+	CreatedDate int64 `json:"createdDate"`
 
 	// CustomerId Customer ID
 	CustomerId string `json:"customerId"`
@@ -2136,7 +2136,7 @@ type ListPrivateNetworkResponseData struct {
 	Cidr string `json:"cidr"`
 
 	// CreatedDate The creation date of the Private Network
-	CreatedDate uint64 `json:"createdDate"`
+	CreatedDate int64 `json:"createdDate"`
 
 	// CustomerId Your customer number
 	CustomerId string `json:"customerId"`
@@ -2342,7 +2342,7 @@ type ObjectStorageAuditResponse struct {
 	TenantId string `json:"tenantId"`
 
 	// Timestamp When the change took place.
-	Timestamp uint64 `json:"timestamp"`
+	Timestamp int64 `json:"timestamp"`
 
 	// TraceId The traceId of the API call which led to the change.
 	TraceId string `json:"traceId"`
@@ -2363,7 +2363,7 @@ type ObjectStorageResponse struct {
 	CancelDate string `json:"cancelDate"`
 
 	// CreatedDate Creation date for object storage.
-	CreatedDate uint64 `json:"createdDate"`
+	CreatedDate int64 `json:"createdDate"`
 
 	// CustomerId Your customer number
 	CustomerId string `json:"customerId"`
@@ -2453,7 +2453,7 @@ type PatchInstanceResponse struct {
 // PatchInstanceResponseData defines model for PatchInstanceResponseData.
 type PatchInstanceResponseData struct {
 	// CreatedDate Creation date of the instance
-	CreatedDate uint64 `json:"createdDate"`
+	CreatedDate int64 `json:"createdDate"`
 
 	// CustomerId Your customer number
 	CustomerId string `json:"customerId"`
@@ -2546,7 +2546,7 @@ type PrivateNetworkAuditResponse struct {
 	TenantId string `json:"tenantId"`
 
 	// Timestamp When the change took place.
-	Timestamp uint64 `json:"timestamp"`
+	Timestamp int64 `json:"timestamp"`
 
 	// TraceId The traceId of the API call which led to the change.
 	TraceId string `json:"traceId"`
@@ -2567,7 +2567,7 @@ type PrivateNetworkResponse struct {
 	Cidr string `json:"cidr"`
 
 	// CreatedDate The creation date of the Private Network
-	CreatedDate uint64 `json:"createdDate"`
+	CreatedDate int64 `json:"createdDate"`
 
 	// CustomerId Your customer number
 	CustomerId string `json:"customerId"`
@@ -2631,7 +2631,7 @@ type ReinstallInstanceResponse struct {
 // ReinstallInstanceResponseData defines model for ReinstallInstanceResponseData.
 type ReinstallInstanceResponseData struct {
 	// CreatedDate Creation date for instance
-	CreatedDate uint64 `json:"createdDate"`
+	CreatedDate int64 `json:"createdDate"`
 
 	// CustomerId Your customer number
 	CustomerId string `json:"customerId"`
@@ -2679,7 +2679,7 @@ type RoleAuditResponse struct {
 	TenantId string `json:"tenantId"`
 
 	// Timestamp When the change took place.
-	Timestamp uint64 `json:"timestamp"`
+	Timestamp int64 `json:"timestamp"`
 
 	// TraceId The traceId of the API call which led to the change.
 	TraceId string `json:"traceId"`
@@ -2752,7 +2752,7 @@ type SecretAuditResponse struct {
 	TenantId string `json:"tenantId"`
 
 	// Timestamp When the change took place.
-	Timestamp uint64 `json:"timestamp"`
+	Timestamp int64 `json:"timestamp"`
 
 	// TraceId The traceId of the API call which led to the change.
 	TraceId string `json:"traceId"`
@@ -2767,7 +2767,7 @@ type SecretAuditResponseAction string
 // SecretResponse defines model for SecretResponse.
 type SecretResponse struct {
 	// CreatedAt The creation date for the secret
-	CreatedAt uint64 `json:"createdAt"`
+	CreatedAt int64 `json:"createdAt"`
 
 	// CustomerId Your Customer number
 	CustomerId string `json:"customerId"`
@@ -2785,7 +2785,7 @@ type SecretResponse struct {
 	Type SecretResponseType `json:"type"`
 
 	// UpdatedAt The last update date for the secret
-	UpdatedAt uint64 `json:"updatedAt"`
+	UpdatedAt int64 `json:"updatedAt"`
 
 	// Value The value of the secret. This will be available only when retrieving a single secret
 	Value string `json:"value"`
@@ -2803,10 +2803,10 @@ type SelfLinks struct {
 // SnapshotResponse defines model for SnapshotResponse.
 type SnapshotResponse struct {
 	// AutoDeleteDate The date when the snapshot will be auto-deleted
-	AutoDeleteDate uint64 `json:"autoDeleteDate"`
+	AutoDeleteDate int64 `json:"autoDeleteDate"`
 
 	// CreatedDate The date when the snapshot was created
-	CreatedDate uint64 `json:"createdDate"`
+	CreatedDate int64 `json:"createdDate"`
 
 	// CustomerId Your customer number
 	CustomerId string `json:"customerId"`
@@ -2863,7 +2863,7 @@ type SnapshotsAuditResponse struct {
 	TenantId string `json:"tenantId"`
 
 	// Timestamp When the change took place.
-	Timestamp uint64 `json:"timestamp"`
+	Timestamp int64 `json:"timestamp"`
 
 	// TraceId The traceId of the API call which led to the change.
 	TraceId string `json:"traceId"`
@@ -2914,7 +2914,7 @@ type TagAuditResponse struct {
 	TenantId string `json:"tenantId"`
 
 	// Timestamp When the change took place.
-	Timestamp uint64 `json:"timestamp"`
+	Timestamp int64 `json:"timestamp"`
 
 	// TraceId The traceId of the API call which led to the change.
 	TraceId string `json:"traceId"`
@@ -3179,7 +3179,7 @@ type UserAuditResponse struct {
 	TenantId string `json:"tenantId"`
 
 	// Timestamp When the change took place.
-	Timestamp uint64 `json:"timestamp"`
+	Timestamp int64 `json:"timestamp"`
 
 	// TraceId The traceId of the API call which led to the change.
 	TraceId string `json:"traceId"`
@@ -3272,7 +3272,7 @@ type VipAuditResponse struct {
 	TenantId string `json:"tenantId"`
 
 	// Timestamp When the change took place.
-	Timestamp uint64 `json:"timestamp"`
+	Timestamp int64 `json:"timestamp"`
 
 	// TraceId The traceId of the API call which led to the change.
 	TraceId string `json:"traceId"`

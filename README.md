@@ -7,9 +7,19 @@ A Kubernetes Cluster API provider for Contabo cloud infrastructure. This provide
 This Cluster API provider allows you to provision and manage Kubernetes clusters on Contabo's cloud infrastructure. It integrates with the Cluster API ecosystem to provide a consistent way to deploy workload clusters across different cloud providers.
 
 The provider includes:
-- **ContaboCluster**: Manages cluster-wide infrastructure (networking, load balancers)
-- **ContaboMachine**: Manages individual virtual machines (VPS instances)
+- **ContaboCluster**: Manages cluster-wide infrastructure (private networking, SSH keys, control plane endpoint)
+- **ContaboMachine**: Manages individual VPS instances with instance reuse pattern and automatic private network assignment
 - **ContaboMachineTemplate**: Template for creating machines with consistent configuration
+
+## Features
+
+- **Instance Reuse Pattern**: Efficiently reuses VPS instances between cluster lifecycles
+- **Private Networking**: Automatic creation and assignment of private networks for cluster communication
+- **SSH Key Management**: Centralized SSH key configuration at cluster level with automatic distribution
+- **State Machine Architecture**: Comprehensive condition tracking with proper error handling and recovery
+- **OAuth2 Authentication**: Secure API access using Contabo's OAuth2 authentication flow
+- **Multi-Region Support**: Deploy clusters across all Contabo regions (EU, US-central, US-east, US-west, SIN)
+- **Cloud-Init Integration**: Full support for cloud-init user data for instance customization
 
 ## Getting Started
 
@@ -148,22 +158,51 @@ make undeploy
 ### API Types
 
 #### ContaboCluster
-Manages cluster-wide infrastructure including networking and control plane endpoint.
+Manages cluster-wide infrastructure including private networking, SSH keys, and control plane endpoint.
 
 **Key fields:**
 - `region`: Contabo region (e.g., "EU", "US-central", "US-east", "US-west", "SIN")
-- `controlPlaneEndpoint`: Kubernetes API server endpoint
-- `network`: Network configuration including subnets
+- `controlPlaneEndpoint`: Kubernetes API server endpoint configuration
+- `privateNetworks`: List of private networks to create for the cluster
+- `sshKeys`: Cluster-wide SSH key configuration for all machines
+- `secretsRef`: Reference to secret containing sensitive cluster data
+
+**Sample configuration:**
+```yaml
+spec:
+  region: "EU"
+  controlPlaneEndpoint:
+    host: "10.0.0.100"
+    port: 6443
+  privateNetworks:
+    - name: "cluster-network"
+      cidr: "10.0.0.0/24"
+  sshKeys:
+    - name: "my-key"
+      keyId: 12345
+```
 
 #### ContaboMachine
-Manages individual VPS instances.
+Manages individual VPS instances with automatic private network assignment and SSH key configuration.
 
 **Key fields:**
-- `instanceType`: Contabo VPS plan (e.g., "S", "M", "L", "XL", "XXL")
-- `image`: OS image ID (e.g., "ubuntu-22.04", "ubuntu-20.04", "centos-8")
-- `region`: Contabo region where the instance will be created
-- `sshKeys`: List of SSH key names/IDs
-- `userData`: Cloud-init user data (base64 encoded)
+- `instance.productId`: Contabo product ID (get from API or portal)
+- `instance.imageId`: OS image ID (get from Contabo API)
+- `instance.sshKeys`: Additional SSH keys specific to this machine (optional)
+- `privateNetworks`: List of private networks to attach to this machine
+- `providerID`: Unique provider identifier for the instance
+
+**Sample configuration:**
+```yaml
+spec:
+  instance:
+    productId: "V45"
+    imageId: "afecbb85-e2fc-46f0-9684-b46b1faf00bb"
+    sshKeys:
+      - 12345
+  privateNetworks:
+    - name: "cluster-network"
+```
 
 #### ContaboMachineTemplate
 Template for creating machines with consistent configuration.
@@ -306,13 +345,25 @@ make test-e2e
 - Ensure your OAuth2 application has sufficient API permissions
 
 **Instance creation failures:**
-- Verify the instance type is available in your selected region
-- Check that the image ID is valid and available
+- Verify the product ID is available in your selected region
+- Check that the image ID is valid and available (use Contabo API to list available images)
 - Ensure your Contabo account has sufficient quota
+- Check the instance display name format follows the required pattern
 
-**Network connectivity issues:**
-- Verify security groups and firewall rules allow necessary traffic
-- Check that the control plane endpoint is accessible
+**Private network issues:**
+- Verify private networks are created at cluster level before machine creation
+- Check that private network CIDR doesn't conflict with existing networks
+- Ensure private network assignment occurs after instance is in "installing" state
+
+**SSH key issues:**
+- Verify SSH key IDs exist in your Contabo account
+- Check that SSH keys are properly referenced in cluster or machine specs
+- Ensure SSH keys are accessible in the selected region
+
+**Instance state issues:**
+- Check instance conditions and status for detailed error information
+- Monitor instance lifecycle transitions (creating → provisioning → installing → running)
+- Verify instance reuse pattern works correctly with display name state management
 
 For more help, please open an issue in the GitHub repository.
 

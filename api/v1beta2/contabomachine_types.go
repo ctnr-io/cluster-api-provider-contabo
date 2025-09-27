@@ -29,13 +29,18 @@ import (
 type ContaboMachineSpec struct {
 	// ProviderID is the unique identifier as specified by the cloud provider.
 	// +optional
-	ProviderID *string `json:"providerID,omitempty"`
+	ProviderID string `json:"providerID"`
 
 	// Instance is the type of instance to create.
 	Instance ContaboInstanceSpec `json:"instance"`
 
 	// PrivateNetworks specifies the network configuration for the machine.
+	// +optional
 	PrivateNetworks []ContaboPrivateNetworkSpec `json:"privateNetworks,omitempty"`
+
+	// Secrets references the secret with user data to configure the machine.
+	// +optional
+	Secrets []ContaboSecretSpec `json:"secrets,omitempty"`
 }
 
 // ContaboMachineStatus defines the observed state of ContaboMachine.
@@ -47,9 +52,13 @@ type ContaboMachineStatus struct {
 	// Instance is the current state of the Contabo instance.
 	Instance *ContaboInstanceStatus `json:"instance,omitempty"`
 
-	// Privatenetworks contains the discovered information about private networks
+	// PrivateNetworks to create and/or attach to the instance.
 	// +optional
 	PrivateNetworks []ContaboPrivateNetworkStatus `json:"privateNetworks,omitempty"`
+
+	// Secrets to create and/or attach to the instance.
+	// +optional
+	Secrets []ContaboSecretStatus `json:"secrets,omitempty"`
 
 	// Addresses contains the Contabo instance associated addresses.
 	Addresses []clusterv1.MachineAddress `json:"addresses,omitempty"`

@@ -6,8 +6,8 @@ This is a **Kubernetes Cluster API Infrastructure Provider** for Contabo VPS ser
 
 ### Core Components
 
-- **ContaboCluster** (`api/v1beta2/contabocluster_types.go`): Manages cluster-wide infrastructure (networking, control plane endpoint)
-- **ContaboMachine** (`api/v1beta2/contabomachine_types.go`): Manages individual VPS instances with instance reuse pattern
+- **ContaboCluster** (`api/v1beta2/contabocluster_types.go`): Manages cluster-wide infrastructure (private networks, SSH keys, control plane endpoint)
+- **ContaboMachine** (`api/v1beta2/contabomachine_types.go`): Manages individual VPS instances with instance reuse pattern and automatic private network assignment
 - **ContaboMachineTemplate**: Template for creating machines with consistent configuration
 
 ### Key Architecture Patterns
@@ -29,6 +29,17 @@ meta.SetStatusCondition(&resource.Status.Conditions, metav1.Condition{
     Reason:  infrastructurev1beta2.CreatingReason,
     Message: fmt.Sprintf("Error: %s", err.Error()), // Optional
 })
+```
+
+**Private Network Integration**: Comprehensive private networking with automatic assignment:
+```go
+// Enable private networking during instance creation
+createRequest.AddOns = &models.CreateInstanceAddons{
+    PrivateNetworking: &map[string]interface{}{}, // Empty object enables addon
+}
+
+// Assign specific networks after instance reaches "installing" state
+resp, err := r.ContaboClient.AssignInstancePrivateNetwork(ctx, networkID, instanceID, params)
 ```
 
 ## Critical Development Workflows
@@ -71,14 +82,17 @@ make dev-redeploy    # Rebuild and redeploy (includes undeploy)
 
 ### Controller Patterns
 - Always initialize conditions: `if resource.Status.Conditions == nil { resource.Status.Conditions = []metav1.Condition{} }`
-- Use `meta.SetStatusCondition` for all condition updates
+- Use `meta.SetStatusCondition` for all condition updates from `api/v1beta2/conditions.go`
 - Include error messages in condition messages for debugging
 - Controllers use `patchHelper.Patch(ctx, resource)` pattern for status updates
+- Use comprehensive state machine patterns with proper condition transitions
 
 ### Instance Management Patterns
 - Instances are reused between cluster lifecycles (not destroyed on cluster deletion)
 - Instance state is tracked via display name formatting: `<id>-<state>-<cluster-id>`
 - Use helpers in `contabo_helpers.go`: `BuildInstanceDisplayNameWithState()`, `GetInstanceState()`, `ParseProviderID()`
+- Private networks are assigned after instance reaches "installing" state using `AssignInstancePrivateNetwork` API
+- SSH keys are configured during instance creation via `CreateInstanceRequest.SshKeys`
 
 ### Naming Conventions
 - API group: `infrastructure.cluster.x-k8s.io/v1beta2`
@@ -105,9 +119,10 @@ make dev-redeploy    # Rebuild and redeploy (includes undeploy)
 
 ### Key Files for Understanding Data Flow
 - `cmd/main.go`: Controller setup and credential loading
-- `internal/controller/contabocluster_controller.go`: Cluster lifecycle management
-- `internal/controller/contabomachine_controller.go`: Instance lifecycle and reuse logic
-- `internal/controller/contabo_helpers.go`: Instance state management utilities
+- `internal/controller/contabocluster_controller.go`: Cluster lifecycle management with comprehensive state machine
+- `internal/controller/contabomachine_controller.go`: Instance lifecycle, private network assignment, and reuse logic
+- `internal/controller/contabo_helpers.go`: Instance state management utilities and UUID generation
+- `api/v1beta2/conditions.go`: All condition types and reasons used throughout controllers
 
 ## Testing and Debugging
 
@@ -119,4 +134,7 @@ Run `test/setup-e2e.sh` to validate credentials before running `make test-e2e`
 - **API client issues**: Regenerate client with `make generate-api-client` after OpenAPI changes
 - **Authentication failures**: Verify all 4 environment variables are set correctly
 - **Instance not found**: Check instance display name format and state management in helpers
+- **Private network assignment**: Ensure networks are created at cluster level first, then assigned to instances during "installing" state
+- **SSH key configuration**: Verify SSH key IDs exist in Contabo account and are referenced correctly in specs
+- **Instance lifecycle**: Monitor condition transitions and state machine progression for proper debugging
 - **clusterctl version mismatch**: If e2e tests fail with "v1beta2 management clusters, v1beta1 detected", clean existing CAPI installation first with `clusterctl delete --all --include-crd --include-namespace` before running tests

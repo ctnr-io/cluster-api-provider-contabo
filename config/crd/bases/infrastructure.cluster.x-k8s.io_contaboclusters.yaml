@@ -28,7 +28,7 @@ spec:
     - description: Private Networks
       jsonPath: .status.privateNetworks[].name
       name: Private Networks
-      type: string[]
+      type: string
     - description: API Endpoint
       jsonPath: .spec.controlPlaneEndpoint.host
       name: Endpoint
@@ -77,8 +77,8 @@ spec:
                     type: integer
                 type: object
               privateNetworks:
-                description: PrivateNetworks specifies the network configuration for
-                  the machine.
+                description: PrivateNetworks specifies the private network configuration
+                  for the cluster.
                 items:
                   description: CreatePrivateNetworkRequest defines model for CreatePrivateNetworkRequest.
                   properties:
@@ -103,6 +103,34 @@ spec:
                 description: Region is the Contabo region where the cluster will be
                   deployed
                 type: string
+              secrets:
+                description: Secrets references the secret to create to configure
+                  the cluster.
+                items:
+                  description: CreateSecretRequest defines model for CreateSecretRequest.
+                  properties:
+                    name:
+                      description: Name The name of the secret that will keep the
+                        password
+                      type: string
+                    type:
+                      description: Type The type of the secret. Can be `password`
+                        or `ssh`
+                      type: string
+                    value:
+                      description: 'Value The secret value that needs to be saved.
+                        In case of a password it must match a pattern with at least
+                        one upper and lower case character and either one number with
+                        two special characters `!@#$^&*?_~` or at least three numbers
+                        with one special character `!@#$^&*?_~`. This is expressed
+                        in the following regular expression: `^((?=.*?[A-Z]{1,})(?=.*?[a-z]{1,}))(((?=(?:[^d]*d){1})(?=([^^&*?_~]*[!@#$^&*?_~]){2,}))|((?=(?:[^d]*d){3})(?=.*?[!@#$^&*?_~]+))).{8,}$`'
+                      type: string
+                  required:
+                  - name
+                  - type
+                  - value
+                  type: object
+                type: array
             required:
             - region
             type: object
@@ -360,6 +388,51 @@ spec:
               ready:
                 description: Ready denotes that the cluster (infrastructure) is ready.
                 type: boolean
+              secrets:
+                description: Secrets contains the references to secrets used by the
+                  machine.
+                items:
+                  description: SecretResponse defines model for SecretResponse.
+                  properties:
+                    createdAt:
+                      description: CreatedAt The creation date for the secret
+                      format: int64
+                      type: integer
+                    customerId:
+                      description: CustomerId Your Customer number
+                      type: string
+                    name:
+                      description: Name The name assigned to the password/ssh
+                      type: string
+                    secretId:
+                      description: SecretId Secret's id
+                      type: number
+                    tenantId:
+                      description: TenantId Your customer tenant id
+                      type: string
+                    type:
+                      description: Type The type of the secret. This will be available
+                        only when retrieving secrets
+                      type: string
+                    updatedAt:
+                      description: UpdatedAt The last update date for the secret
+                      format: int64
+                      type: integer
+                    value:
+                      description: Value The value of the secret. This will be available
+                        only when retrieving a single secret
+                      type: string
+                  required:
+                  - createdAt
+                  - customerId
+                  - name
+                  - secretId
+                  - tenantId
+                  - type
+                  - updatedAt
+                  - value
+                  type: object
+                type: array
             type: object
         required:
         - spec

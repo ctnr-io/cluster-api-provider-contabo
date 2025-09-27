@@ -329,72 +329,13 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 
 		It("creates ContaboCluster and control plane with V76 product", func() {
-			clusterManifest := fmt.Sprintf(`---
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
-kind: ContaboCluster
-metadata:
-  name: test-cluster
-  namespace: %s
-spec:
-  region: EU
-  controlPlaneEndpoint:
-    host: 10.0.0.100
-    port: 6443
-  network:
-    privateNetworks:
-    - name: test-network
----
-apiVersion: cluster.x-k8s.io/v1beta2
-kind: Cluster
-metadata:
-  name: test-cluster
-  namespace: %s
-spec:
-  infrastructureRef:
-    apiGroup: infrastructure.cluster.x-k8s.io
-    kind: ContaboCluster
-    name: test-cluster
----
-kind: KubeadmConfig
-apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
-metadata:
-  name: test-control-plane
-  namespace: %s
-spec:
-  joinConfiguration:
-		controlPlane:
-			localAPIEndpoint:
-				advertiseAddress: 10.0.0.100
----
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
-kind: ContaboMachine
-metadata:
-  name: test-control-plane
-  namespace: %s
-spec:
-  instanceType: V76
-  region: EU
----
-apiVersion: cluster.x-k8s.io/v1beta2
-kind: Machine
-metadata:
-  name: test-control-plane
-  namespace: %s
-  labels:
-    cluster.x-k8s.io/cluster-name: test-cluster
-    cluster.x-k8s.io/control-plane: ""
-spec:
-  clusterName: test-cluster
-  infrastructureRef:
-    apiGroup: infrastructure.cluster.x-k8s.io
-    kind: ContaboMachine
-    name: test-control-plane
-  bootstrap:
-    dataSecretName: test-bootstrap-data
-`, testNamespace, testNamespace, testNamespace, testNamespace, testNamespace)
-
+			clusterManifest, err := os.ReadFile("test/fixtures/cluster.yaml")
+			if err != nil {
+				panic(err)
+			}
+			
 			By("applying cluster and control plane manifests")
-			applyManifest(clusterManifest)
+			applyManifest(string(clusterManifest))
 
 			By("verifying cluster resources are created")
 			waitForResource("cluster", "test-cluster", 30*time.Second)

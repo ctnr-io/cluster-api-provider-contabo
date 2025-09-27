@@ -98,21 +98,7 @@ func GetInstanceState(displayName string) string {
 	return StateAvailable // default
 }
 
-// MapInstanceStatusToMachineState maps Contabo instance status to ContaboMachineInstanceState
-func MapInstanceStatusToMachineState(status models.InstanceStatus) infrastructurev1beta2.ContaboMachineInstanceState {
-	switch status {
-	case models.InstanceStatusRunning:
-		return infrastructurev1beta2.ContaboMachineInstanceStateRunning
-	case models.InstanceStatusStopped:
-		return infrastructurev1beta2.ContaboMachineInstanceStateStopped
-	case models.InstanceStatusProvisioning, models.InstanceStatusInstalling:
-		return infrastructurev1beta2.ContaboMachineInstanceStatePending
-	case models.InstanceStatusError, models.InstanceStatusUnknown:
-		return infrastructurev1beta2.ContaboMachineInstanceStateUnknown
-	default:
-		return infrastructurev1beta2.ContaboMachineInstanceStateUnknown
-	}
-}
+// ConvertRegionToCreateInstanceRegion converts a string region to the OpenAPI enum type
 
 // ConvertRegionToCreateInstanceRegion converts a string region to the OpenAPI enum type
 func ConvertRegionToCreateInstanceRegion(region string) *models.CreateInstanceRequestRegion {
@@ -189,17 +175,6 @@ func mapStateToShort(state string) string {
 
 // GetClusterNameFromDisplayName extracts cluster name from display name
 // Returns empty string if not in provisioning or bound state
-// GetClusterIDFromDisplayName extracts cluster ID from display name
-// Returns empty string if not in provisioning or bound state
-// Expects format: "<instance-id>-<state>-<cluster-id>"
-func GetClusterIDFromDisplayName(displayName string) string {
-	parts := strings.Split(displayName, "-")
-	if len(parts) >= 3 && (parts[1] == stateProvisioning || parts[1] == stateBound) {
-		return strings.Join(parts[2:], "-")
-	}
-	return ""
-}
-
 // EnsureClusterUUID ensures the cluster has a unique UUID label
 // If the cluster doesn't have a UUID label, generates a new UUID v4 and returns it
 // If it already has one, returns the existing UUID
@@ -233,4 +208,24 @@ func BuildShortClusterID(clusterUUID string) string {
 		return clusterUUID[:4]
 	}
 	return clusterUUID
+}
+
+// GenerateRequestID generates a UUID v4 for Contabo API request tracking
+func GenerateRequestID() string {
+	return uuid.New().String()
+}
+
+// removeDuplicateInt64s removes duplicate values from an int64 slice
+func removeDuplicateInt64s(slice []int64) []int64 {
+	keys := make(map[int64]bool)
+	result := []int64{}
+
+	for _, item := range slice {
+		if !keys[item] {
+			keys[item] = true
+			result = append(result, item)
+		}
+	}
+
+	return result
 }

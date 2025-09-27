@@ -1,0 +1,63 @@
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: ContaboCluster
+metadata:
+  name: test-cluster
+  namespace: contabo-e2e-test
+spec:
+  privateNetworks:
+  - name: test-network
+    region: EU
+  secrets:
+  - name: test-ssh-key
+    type: ssh
+    value: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIALnNY0Tqoak+qMLx/DE+SjPc9OBKfmGYNZYkB4TjxZu"
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: Cluster
+metadata:
+  name: test-cluster
+  namespace: contabo-e2e-test
+spec:
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: ContaboCluster
+    name: test-cluster
+---
+kind: KubeadmConfig
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+metadata:
+  name: test-control-plane
+  namespace: contabo-e2e-test
+spec:
+  joinConfiguration:
+  controlPlane:
+    localAPIEndpoint:
+  advertiseAddress: 10.0.0.100
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: ContaboMachine
+metadata:
+  name: test-control-plane
+  namespace: contabo-e2e-test
+spec:
+  instance:
+    region: EU
+    productId: V76
+  privateNetworks:
+  - name: test-network
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: Machine
+metadata:
+  name: test-control-plane
+  namespace: contabo-e2e-test
+  labels:
+    cluster.x-k8s.io/cluster-name: test-cluster
+    cluster.x-k8s.io/control-plane: ""
+spec:
+  clusterName: test-cluster
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: ContaboMachine
+    name: test-control-plane
