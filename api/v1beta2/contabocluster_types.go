@@ -26,21 +26,12 @@ import (
 
 // ContaboClusterSpec defines the desired state of ContaboCluster
 type ContaboClusterSpec struct {
-	// Region is the Contabo region where the cluster will be deployed
-	// +kubebuilder:validation:Required
-	Region string `json:"region"`
-
 	// ControlPlaneEndpoint represents the endpoint used to communicate with the control plane.
 	// +optional
 	ControlPlaneEndpoint clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty"`
 
-	// PrivateNetworks specifies the private network configuration for the cluster.
-	// +optional
-	PrivateNetworks []ContaboPrivateNetworkSpec `json:"privateNetworks,omitempty"`
-
-	// Secrets references the secret to create to configure the cluster.
-	// +optional
-	Secrets []ContaboSecretSpec `json:"secrets,omitempty"`
+	// PrivateNetwork specifies the private network configuration for the cluster.
+	PrivateNetwork ContaboPrivateNetworkSpec `json:"privateNetworks"`
 }
 
 // ContaboClusterStatus defines the observed state of ContaboCluster.
@@ -49,13 +40,17 @@ type ContaboClusterStatus struct {
 	// +optional
 	Ready bool `json:"ready"`
 
-	// PrivateNetworkds contains the discovered information about private networks
+	// ClusterUUID is the identifier of the Contabo cluster.
 	// +optional
-	PrivateNetworks []ContaboPrivateNetworkStatus `json:"privateNetworks,omitempty"`
+	ClusterUUID string `json:"clusterID,omitempty"`
 
-	// Secrets contains the references to secrets used by the machine.
+	// PrivateNetwork contains the discovered information about private networks
 	// +optional
-	Secrets []ContaboSecretStatus `json:"secrets,omitempty"`
+	PrivateNetwork *ContaboPrivateNetworkStatus `json:"privateNetworks,omitempty"`
+
+	// SshKey contains the references to secrets used by the machine.
+	// +optional
+	SshKey *ContaboSshKeyStatus `json:"secrets,omitempty"`
 
 	// Conditions defines current service state of the ContaboCluster.
 	// +optional
@@ -67,16 +62,33 @@ type ContaboClusterStatus struct {
 }
 
 // ContaboPrivateNetworkSpec defines the desired state of a Contabo private network
-type ContaboPrivateNetworkSpec = CreatePrivateNetworkRequest
+type ContaboPrivateNetworkSpec struct {
+	// Region Region where the Private Network should be located. Default is `EU`
+	// +kubebuilder:validation:Required
+	Region string `json:"region"`
+}
 
 // ContaboPrivateNetworkStatus defines the observed state of a Contabo private network
 type ContaboPrivateNetworkStatus = PrivateNetworkResponse
 
-// ContaboSecretSpec defines the desired state of a Contabo secret
-type ContaboSecretSpec = CreateSecretRequest
+// ContaboSshKey defines the desired state of a Contabo secret
+type ContaboSshKey struct {
+	// Value is the actual SSH public key value
+	// +kubebuilder:validation:Required
+	Value string `json:"value"`
+}
 
-// ContaboSecretStatus defines the observed state of a Contabo secret
-type ContaboSecretStatus = SecretResponse
+// ContaboSshKeyStatus defines the observed state of a Contabo secret
+type ContaboSshKeyStatus struct {
+	// Name is the name of the SSH key
+	Name string `json:"name"`
+
+	// SecretId is the ID of the SSH key in Contabo
+	SecretId int64 `json:"secretId"`
+
+	// Value is the actual SSH public key value
+	Value string `json:"value"`
+}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status

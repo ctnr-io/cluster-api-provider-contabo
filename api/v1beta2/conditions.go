@@ -37,7 +37,7 @@ const (
 // ContaboCluster condition types.
 const (
 	// ReadyCondition indicates the cluster infrastructure is ready.
-	ReadyCondition = clusterv1.ReadyCondition
+	ClusterReadyCondition = clusterv1.ReadyCondition
 
 	// ControlPlaneEndpointReadyCondition indicates the control plane endpoint is ready.
 	ControlPlaneEndpointReadyCondition = "ControlPlaneEndpointReady"
@@ -45,17 +45,23 @@ const (
 	// ClusterPrivateNetworkReadyCondition indicates the cluster private networks are ready.
 	ClusterPrivateNetworkReadyCondition = "ClusterPrivateNetworkReady"
 
-	// ClusterSecretsReadyCondition indicates the cluster secrets are ready.
-	ClusterSecretsReadyCondition = "ClusterSecretsReady"
+	// ClusterSshKeyReadyCondition indicates the cluster sshkey are ready.
+	ClusterSshKeyReadyCondition = "ClusterSshKeyReady"
 )
 
 // ContaboCluster condition reasons.
 const (
 	// CreatingReason indicates that the cluster infrastructure is being created.
-	CreatingReason = "Creating"
+	ClusterCreatingReason = "Creating"
+
+	// UpdatingReason indicates that the cluster infrastructure is being updated.
+	ClusterUpdatingReason = "Updating"
+
+	// DeletingReason indicates that the cluster infrastructure is being deleted.
+	ClusterDeletingReason = clusterv1.DeletingReason
 
 	// AvailableReason indicates that the cluster infrastructure is ready and available.
-	AvailableReason = clusterv1.AvailableReason
+	ClusterAvailableReason = clusterv1.AvailableReason
 )
 
 // Control plane endpoint condition reasons.
@@ -91,22 +97,22 @@ const (
 	ClusterPrivateNetworkSkippedReason = "ClusterPrivateNetworkSkipped"
 )
 
-// Cluster secrets condition reasons.
+// Cluster sshkey condition reasons.
 const (
-	// ClusterSecretsCreatingReason indicates cluster secrets are being created.
-	ClusterSecretsCreatingReason = "ClusterSecretsCreating"
+	// ClusterSshKeyCreatingReason indicates cluster sshkey are being created.
+	ClusterSshKeyCreatingReason = "ClusterSshKeyCreating"
 
-	// ClusterSecretsReadyReason indicates cluster secrets are ready.
-	ClusterSecretsReadyReason = "ClusterSecretsReady"
+	// ClusterSshKeyReadyReason indicates cluster sshkey are ready.
+	ClusterSshKeyReadyReason = "ClusterSshKeyReady"
 
-	// ClusterSecretsFailedReason indicates cluster secrets failed.
-	ClusterSecretsFailedReason = "ClusterSecretsFailed"
+	// ClusterSshKeyFailedReason indicates cluster sshkey failed.
+	ClusterSshKeyFailedReason = "ClusterSshKeyFailed"
 
-	// ClusterSecretsDeletingReason indicates cluster secrets are being deleted.
-	ClusterSecretsDeletingReason = "ClusterSecretsDeleting"
+	// ClusterSshKeyDeletingReason indicates cluster sshkey are being deleted.
+	ClusterSshKeyDeletingReason = "ClusterSshKeyDeleting"
 
-	// ClusterSecretsSkippedReason indicates cluster secrets configuration was skipped.
-	ClusterSecretsSkippedReason = "ClusterSecretsSkipped"
+	// ClusterSshKeySkippedReason indicates cluster sshkey configuration was skipped.
+	ClusterSshKeySkippedReason = "ClusterSshKeySkipped"
 )
 
 // =============================================================================
@@ -124,8 +130,8 @@ const (
 	// MachinePrivateNetworksReadyCondition indicates the machine private networks are ready.
 	MachinePrivateNetworksReadyCondition = "MachinePrivateNetworksReady"
 
-	// MachineSecretsReadyCondition indicates the machine secrets are ready.
-	MachineSecretsReadyCondition = "MachineSecretsReady"
+	// MachineSshKeyReadyCondition indicates the machine sshkey are ready.
+	MachineSshKeyReadyCondition = "MachineSshKeyReady"
 
 	// MachineSSHKeysReadyCondition indicates the machine SSH keys are configured.
 	MachineSSHKeysReadyCondition = "MachineSSHKeysReady"
@@ -142,8 +148,8 @@ const (
 	// InstanceWaitingForBootstrapDataReason indicates waiting for bootstrap data to be ready.
 	InstanceWaitingForBootstrapDataReason = "InstanceWaitingForBootstrapData"
 
-	// InstanceWaitingForMachineSecretsReason indicates waiting for machine secrets to be ready.
-	InstanceWaitingForMachineSecretsReason = "InstanceWaitingForMachineSecrets"
+	// InstanceWaitingForMachineSshKeyReason indicates waiting for machine sshkey to be ready.
+	InstanceWaitingForMachineSshKeyReason = "InstanceWaitingForMachineSshKey"
 
 	// InstanceWaitingForPrivateNetworksReason indicates waiting for machine private networks to be ready.
 	InstanceWaitingForPrivateNetworksReason = "InstanceWaitingForPrivateNetworks"
@@ -194,22 +200,22 @@ const (
 	MachinePrivateNetworkSkippedReason = "MachinePrivateNetworkSkipped"
 )
 
-// Machine secrets condition reasons.
+// Machine sshkey condition reasons.
 const (
-	// MachineSecretsCreatingReason indicates machine secrets are being created.
-	MachineSecretsCreatingReason = "MachineSecretsCreating"
+	// MachineSshKeyCreatingReason indicates machine sshkey are being created.
+	MachineSshKeyCreatingReason = "MachineSshKeyCreating"
 
-	// MachineSecretsReadyReason indicates machine secrets are ready.
-	MachineSecretsReadyReason = "MachineSecretsReady"
+	// MachineSshKeyReadyReason indicates machine sshkey are ready.
+	MachineSshKeyReadyReason = "MachineSshKeyReady"
 
-	// MachineSecretsFailedReason indicates machine secrets failed.
-	MachineSecretsFailedReason = "MachineSecretsFailed"
+	// MachineSshKeyFailedReason indicates machine sshkey failed.
+	MachineSshKeyFailedReason = "MachineSshKeyFailed"
 
-	// MachineSecretsDeletingReason indicates machine secrets are being deleted.
-	MachineSecretsDeletingReason = "MachineSecretsDeleting"
+	// MachineSshKeyDeletingReason indicates machine sshkey are being deleted.
+	MachineSshKeyDeletingReason = "MachineSshKeyDeleting"
 
-	// MachineSecretsSkippedReason indicates machine secrets configuration was skipped.
-	MachineSecretsSkippedReason = "MachineSecretsSkipped"
+	// MachineSshKeySkippedReason indicates machine sshkey configuration was skipped.
+	MachineSshKeySkippedReason = "MachineSshKeySkipped"
 )
 
 // Machine SSH keys condition reasons.

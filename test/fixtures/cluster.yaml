@@ -6,12 +6,7 @@ metadata:
   namespace: contabo-e2e-test
 spec:
   privateNetworks:
-  - name: test-network
     region: EU
-  secrets:
-  - name: test-ssh-key
-    type: ssh
-    value: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIALnNY0Tqoak+qMLx/DE+SjPc9OBKfmGYNZYkB4TjxZu"
 ---
 apiVersion: cluster.x-k8s.io/v1beta2
 kind: Cluster
@@ -42,10 +37,7 @@ metadata:
   namespace: contabo-e2e-test
 spec:
   instance:
-    region: EU
     productId: V76
-  privateNetworks:
-  - name: test-network
 ---
 apiVersion: cluster.x-k8s.io/v1beta2
 kind: Machine

@@ -214,18 +214,3 @@ func BuildShortClusterID(clusterUUID string) string {
 func GenerateRequestID() string {
 	return uuid.New().String()
 }
-
-// removeDuplicateInt64s removes duplicate values from an int64 slice
-func removeDuplicateInt64s(slice []int64) []int64 {
-	keys := make(map[int64]bool)
-	result := []int64{}
-
-	for _, item := range slice {
-		if !keys[item] {
-			keys[item] = true
-			result = append(result, item)
-		}
-	}
-
-	return result
-}

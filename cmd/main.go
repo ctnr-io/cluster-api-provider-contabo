@@ -145,7 +145,7 @@ func main() {
 	}
 
 	// Initialize Contabo OpenAPI client with token manager
-	contaboClient, err := contaboclient.NewClient(
+	contaboClient, err := contaboclient.NewClientWithResponses(
 		"https://api.contabo.com",
 		contaboclient.WithRequestEditorFn(func(ctx context.Context, req *http.Request) error {
 			token, err := tokenManager.GetToken()

@@ -33,14 +33,6 @@ type ContaboMachineSpec struct {
 
 	// Instance is the type of instance to create.
 	Instance ContaboInstanceSpec `json:"instance"`
-
-	// PrivateNetworks specifies the network configuration for the machine.
-	// +optional
-	PrivateNetworks []ContaboPrivateNetworkSpec `json:"privateNetworks,omitempty"`
-
-	// Secrets references the secret with user data to configure the machine.
-	// +optional
-	Secrets []ContaboSecretSpec `json:"secrets,omitempty"`
 }
 
 // ContaboMachineStatus defines the observed state of ContaboMachine.
@@ -51,14 +43,6 @@ type ContaboMachineStatus struct {
 
 	// Instance is the current state of the Contabo instance.
 	Instance *ContaboInstanceStatus `json:"instance,omitempty"`
-
-	// PrivateNetworks to create and/or attach to the instance.
-	// +optional
-	PrivateNetworks []ContaboPrivateNetworkStatus `json:"privateNetworks,omitempty"`
-
-	// Secrets to create and/or attach to the instance.
-	// +optional
-	Secrets []ContaboSecretStatus `json:"secrets,omitempty"`
 
 	// Addresses contains the Contabo instance associated addresses.
 	Addresses []clusterv1.MachineAddress `json:"addresses,omitempty"`
@@ -107,7 +91,11 @@ type ContaboMachineStatus struct {
 }
 
 // ContaboInstanceSpec defines the desired state of a Contabo instance
-type ContaboInstanceSpec = CreateInstanceRequest
+type ContaboInstanceSpec struct {
+	// ProductID is the Contabo product ID (instance type)
+	// +kubebuilder:validation:Required
+	ProductID string `json:"productID"`
+}
 
 // ContaboInstanceStatus defines the observed state of a Contabo instance
 type ContaboInstanceStatus = InstanceResponse

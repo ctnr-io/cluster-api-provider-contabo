@@ -41,11 +41,16 @@ linters:
           - dupl
           - lll
         path: internal/*
+      - linters:
+          - dupl
+          - gocyclo
+          - lll
+        path: pkg/contabo/.*/.*
     paths:
       - third_party$
       - builtin$
       - examples$
-      - pkg/contabo/client/.*
+      - pkg/contabo/.*/.*
 formatters:
   enable:
     - gofmt
@@ -56,4 +61,4 @@ formatters:
       - third_party$
       - builtin$
       - examples$
-      - pkg/contabo/client/.*
+      - pkg/contabo/.*/.*

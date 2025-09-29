@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -39,6 +40,17 @@ import (
 
 	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
 	contaboclient "github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/v1.0.0/client"
+	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/v1.0.0/models"
+	"github.com/google/uuid"
+
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+
+	"golang.org/x/crypto/ssh"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
 // ContaboClusterReconciler reconciles a ContaboCluster object
@@ -46,7 +58,8 @@ type ContaboClusterReconciler struct {
 	client.Client
 	Scheme        *runtime.Scheme
 	Recorder      record.EventRecorder
-	ContaboClient *contaboclient.Client
+	ContaboClient *contaboclient.ClientWithResponses
+	patchHelper   *patch.Helper
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=contaboclusters,verbs=get;list;watch;create;update;patch;delete
@@ -88,14 +101,14 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	log = log.WithValues("cluster", cluster.Name)
 
 	// Initialize the patch helper
-	patchHelper, err := patch.NewHelper(contaboCluster, r.Client)
+	r.patchHelper, err = patch.NewHelper(contaboCluster, r.Client)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
 	// Always attempt to Patch the ContaboCluster object and status after each reconciliation
 	defer func() {
-		if err := patchHelper.Patch(ctx, contaboCluster); err != nil {
+		if err := r.patchHelper.Patch(ctx, contaboCluster); err != nil {
 			log.Error(err, "failed to patch ContaboCluster")
 		}
 	}()
@@ -106,96 +119,266 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Handle non-deleted clusters
-	return r.reconcileNormal(ctx, contaboCluster)
+	return r.reconcileApply(ctx, contaboCluster)
 }
 
-func (r *ContaboClusterReconciler) reconcileNormal(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
+func (r *ContaboClusterReconciler) reconcileApply(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	log.Info("Starting ContaboCluster reconciliation state machine", "cluster", contaboCluster.Name)
 
 	// Initialize basic cluster setup
-	if err := r.initializeCluster(ctx, contaboCluster); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	// State Machine: Process each component in dependency order
-	// 1. Reconcile secrets (needed for other components)
-	if result, err := r.reconcileClusterSecrets(ctx, contaboCluster); err != nil || result.Requeue || result.RequeueAfter > 0 {
-		return result, err
-	}
-
-	// 2. Reconcile private networks (needed before control plane setup)
-	if result, err := r.reconcileClusterPrivateNetworks(ctx, contaboCluster); err != nil || result.Requeue || result.RequeueAfter > 0 {
-		return result, err
-	}
-
-	// 3. Reconcile control plane endpoint (depends on networks)
-	if result, err := r.reconcileControlPlaneEndpoint(ctx, contaboCluster); err != nil || result.Requeue || result.RequeueAfter > 0 {
-		return result, err
-	}
-
-	// Final state: Set cluster as ready if all components are ready
-	return r.reconcileClusterReady(ctx, contaboCluster)
-}
-
-// initializeCluster sets up basic cluster metadata and finalizers
-func (r *ContaboClusterReconciler) initializeCluster(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
-	log := logf.FromContext(ctx)
 
 	// Add finalizer
 	controllerutil.AddFinalizer(contaboCluster, infrastructurev1beta2.ClusterFinalizer)
 
-	// Initialize status conditions if needed
-	if contaboCluster.Status.Conditions == nil {
-		contaboCluster.Status.Conditions = []metav1.Condition{}
-	}
-
 	// Ensure cluster has a unique UUID for global identification
-	clusterUUID := EnsureClusterUUID(contaboCluster)
-	log.Info("Cluster UUID ensured", "uuid", clusterUUID)
+	clusterUUID := ""
+	if contaboCluster.Status.ClusterUUID == "" {
+		clusterUUID = uuid.New().String()
+		contaboCluster.Status.ClusterUUID = clusterUUID
 
-	// Set initial creating state
-	meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
-		Type:   infrastructurev1beta2.ReadyCondition,
-		Status: metav1.ConditionFalse,
-		Reason: infrastructurev1beta2.CreatingReason,
-	})
-
-	return nil
-}
-
-// reconcileClusterReady sets the overall cluster readiness based on all component states
-func (r *ContaboClusterReconciler) reconcileClusterReady(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
-
-	// Check if all required conditions are ready
-	secretsReady := meta.IsStatusConditionTrue(contaboCluster.Status.Conditions, infrastructurev1beta2.ClusterSecretsReadyCondition)
-	networksReady := meta.IsStatusConditionTrue(contaboCluster.Status.Conditions, infrastructurev1beta2.ClusterPrivateNetworkReadyCondition)
-	endpointReady := meta.IsStatusConditionTrue(contaboCluster.Status.Conditions, infrastructurev1beta2.ControlPlaneEndpointReadyCondition)
-
-	if secretsReady && networksReady && endpointReady {
-		// All components are ready
-		contaboCluster.Status.Ready = true
+		// Set initial creating state
 		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
-			Type:   infrastructurev1beta2.ReadyCondition,
-			Status: metav1.ConditionTrue,
-			Reason: infrastructurev1beta2.AvailableReason,
-		})
-		log.Info("ContaboCluster is ready")
-	} else {
-		// Still waiting for some components
-		contaboCluster.Status.Ready = false
-		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
-			Type:   infrastructurev1beta2.ReadyCondition,
+			Type:   infrastructurev1beta2.ClusterReadyCondition,
 			Status: metav1.ConditionFalse,
-			Reason: "ComponentsNotReady",
+			Reason: infrastructurev1beta2.ClusterCreatingReason,
 		})
-		log.Info("ContaboCluster not ready yet",
-			"secretsReady", secretsReady,
-			"networksReady", networksReady,
-			"endpointReady", endpointReady)
+		if err := r.patchHelper.Patch(ctx, contaboCluster); err != nil {
+			log.Error(err, "Failed to patch cluster status")
+		}
+		log.Info("Assigned new cluster UUID", "clusterUUID", clusterUUID)
+	} else {
+		clusterUUID = contaboCluster.Status.ClusterUUID
+
+		// Set initial updating state
+		if !meta.IsStatusConditionTrue(contaboCluster.Status.Conditions, infrastructurev1beta2.ClusterReadyCondition) {
+			meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+				Type:   infrastructurev1beta2.ClusterReadyCondition,
+				Status: metav1.ConditionFalse,
+				Reason: infrastructurev1beta2.ClusterUpdatingReason,
+			})
+			if err := r.patchHelper.Patch(ctx, contaboCluster); err != nil {
+				log.Error(err, "Failed to patch cluster status")
+			}
+			log.Info("Cluster already has a UUID, continuing reconciliation", "clusterUUID", clusterUUID)
+		}
 	}
+
+	// Check if private network was created
+	if contaboCluster.Status.PrivateNetwork == nil {
+		var privateNetwork *models.PrivateNetworkResponse
+		privateNetworkName := fmt.Sprintf("capc %s %s %s", contaboCluster.Spec.PrivateNetwork.Region, contaboCluster.Name, clusterUUID)
+
+		// Check if private network with the same name already exists in Contabo API
+		resp, _ := r.ContaboClient.RetrievePrivateNetworkListWithResponse(ctx, &models.RetrievePrivateNetworkListParams{
+			Name: &privateNetworkName,
+		})
+
+		if resp != nil && resp.JSON200.Data != nil && len(resp.JSON200.Data) > 0 {
+			privateNetwork = (*models.PrivateNetworkResponse)(&resp.JSON200.Data[0])
+		} else {
+			log.Info("Private network not found in Contabo API, creating new one", "privateNetworkName", privateNetworkName)
+
+			// Create private network if not found
+			description := "Private network created by Cluster API Provider Contabo"
+			privateNetworkCreateResp, err := r.ContaboClient.CreatePrivateNetworkWithResponse(ctx, nil, models.CreatePrivateNetworkJSONRequestBody{
+				Name:        privateNetworkName,
+				Description: &description,
+				Region:      &contaboCluster.Spec.PrivateNetwork.Region,
+			})
+			if err != nil || privateNetworkCreateResp.StatusCode() < 200 || privateNetworkCreateResp.StatusCode() >= 300 {
+				message := "Failed to create private network"
+				meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+					Type:    infrastructurev1beta2.ClusterPrivateNetworkReadyCondition,
+					Status:  metav1.ConditionFalse,
+					Reason:  infrastructurev1beta2.ClusterPrivateNetworkFailedReason,
+					Message: message,
+				})
+				if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+					log.Error(patchErr, "Failed to patch cluster status")
+				}
+				log.Error(err, message)
+				return ctrl.Result{}, err
+			}
+
+			privateNetwork = &privateNetworkCreateResp.JSON201.Data[0]
+		}
+		// Update status with private network info
+		contaboCluster.Status.PrivateNetwork = &infrastructurev1beta2.ContaboPrivateNetworkStatus{
+			Name:             privateNetwork.Name,
+			PrivateNetworkId: privateNetwork.PrivateNetworkId,
+			Region:           privateNetwork.Region,
+			AvailableIps:     privateNetwork.AvailableIps,
+			Cidr:             privateNetwork.Cidr,
+			CreatedDate:      privateNetwork.CreatedDate.UTC().Unix(),
+			Instances:        nil, // Instances will be populated when machines are created and assigned to the private network
+			CustomerId:       privateNetwork.CustomerId,
+			TenantId:         privateNetwork.TenantId,
+			Description:      privateNetwork.Description,
+			DataCenter:       privateNetwork.DataCenter,
+			RegionName:       privateNetwork.RegionName,
+		}
+		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+			Type:   infrastructurev1beta2.ClusterPrivateNetworkReadyCondition,
+			Status: metav1.ConditionTrue,
+			Reason: infrastructurev1beta2.ClusterAvailableReason,
+		})
+		if err := r.patchHelper.Patch(ctx, contaboCluster); err != nil {
+			log.Error(err, "Failed to patch cluster status")
+		}
+		log.Info("Using private network", "privateNetworkName", privateNetwork.Name, "privateNetworkId", privateNetwork.PrivateNetworkId)
+	}
+	// else {
+	// TODO: Check if private network configuration matches spec and update if necessary
+	// }
+
+	// Check if SSH key was created
+	if contaboCluster.Status.SshKey == nil {
+		var sshKey *models.SecretResponse
+		sshKeyName := fmt.Sprintf("capc-%s-%s", contaboCluster.Name, clusterUUID)
+
+		// Check if SSH key with the same name already exists in Contabo API
+		resp, _ := r.ContaboClient.RetrieveSecretListWithResponse(ctx, &models.RetrieveSecretListParams{
+			Name: &sshKeyName,
+		})
+
+		if resp != nil && resp.JSON200.Data != nil && len(resp.JSON200.Data) > 0 {
+			sshKey = &resp.JSON200.Data[0]
+		} else {
+			log.Info("SSH key not found in Contabo API, creating new one", "sshKeyName", sshKeyName)
+
+			// Generate an ssh key pair
+			privateKey, publicKey, err := generateSSHKeyPair()
+			if err != nil {
+				message := "Failed to generate SSH key pair"
+				meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+					Type:    infrastructurev1beta2.ClusterSshKeyReadyCondition,
+					Status:  metav1.ConditionFalse,
+					Reason:  infrastructurev1beta2.ClusterSshKeyFailedReason,
+					Message: message,
+				})
+				if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+					log.Error(patchErr, "Failed to patch cluster status")
+				}
+				log.Error(err, message)
+				return ctrl.Result{}, err
+			}
+
+			// Register private key as Kubernetes secret
+			labels := map[string]string{}
+			labels["cluster.x-k8s.io/managed-by"] = "contabo-operator"
+
+			// Delete secret if already exists
+			err = r.Get(ctx, client.ObjectKey{
+				Name:      sshKeyName,
+				Namespace: contaboCluster.Namespace,
+			}, &corev1.Secret{})
+			if err == nil {
+				// Secret already exists, delete it first
+				err = r.Delete(ctx, &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      sshKeyName,
+						Namespace: contaboCluster.Namespace,
+					},
+				})
+				if err != nil {
+					message := "Failed to delete existing SSH key secret"
+					meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+						Type:    infrastructurev1beta2.ClusterSshKeyReadyCondition,
+						Status:  metav1.ConditionFalse,
+						Reason:  infrastructurev1beta2.ClusterSshKeyFailedReason,
+						Message: message,
+					})
+					if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+						log.Error(patchErr, "Failed to patch cluster status")
+					}
+					log.Error(err, message)
+					return ctrl.Result{}, err
+				}
+			}
+
+			// Create new secret
+			if err := r.Create(ctx, &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      sshKeyName,
+					Namespace: contaboCluster.Namespace,
+				},
+				Data: map[string][]byte{
+					"id_rsa":     []byte(privateKey),
+					"id_rsa.pub": []byte(publicKey),
+				},
+			}); err != nil {
+				message := "Failed to create SSH key secret"
+				meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+					Type:    infrastructurev1beta2.ClusterSshKeyReadyCondition,
+					Status:  metav1.ConditionFalse,
+					Reason:  infrastructurev1beta2.ClusterSshKeyFailedReason,
+					Message: message,
+				})
+				if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+					log.Error(patchErr, "Failed to patch cluster status")
+				}
+				log.Error(err, message)
+				return ctrl.Result{}, err
+			}
+			if err != nil {
+				message := "Failed to generate SSH key pair"
+				meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+					Type:    infrastructurev1beta2.ClusterSshKeyReadyCondition,
+					Status:  metav1.ConditionFalse,
+					Reason:  infrastructurev1beta2.ClusterSshKeyFailedReason,
+					Message: message,
+				})
+				if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+					log.Error(patchErr, "Failed to patch cluster status")
+				}
+				log.Error(err, message)
+				return ctrl.Result{}, err
+			}
+
+			// Create SSH key if not found
+			sshKeyCreateResp, err := r.ContaboClient.CreateSecretWithResponse(ctx, &models.CreateSecretParams{}, models.CreateSecretRequest{
+				Name:  sshKeyName,
+				Value: publicKey,
+				Type:  "ssh",
+			})
+			if err != nil || sshKeyCreateResp.StatusCode() < 200 || sshKeyCreateResp.StatusCode() >= 300 {
+				message := "Failed to create SSH key"
+				meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+					Type:    infrastructurev1beta2.ClusterSshKeyReadyCondition,
+					Status:  metav1.ConditionFalse,
+					Reason:  infrastructurev1beta2.ClusterSshKeyFailedReason,
+					Message: message,
+				})
+				if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+					log.Error(patchErr, "Failed to patch cluster status")
+				}
+				log.Error(err, message)
+				return ctrl.Result{}, err
+			}
+			sshKey = &sshKeyCreateResp.JSON201.Data[0]
+		}
+
+		// Update status with SSH key info
+		contaboCluster.Status.SshKey = &infrastructurev1beta2.ContaboSshKeyStatus{
+			Name:     sshKey.Name,
+			SecretId: int64(sshKey.SecretId),
+			Value:    sshKey.Value,
+		}
+		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+			Type:   infrastructurev1beta2.ClusterSshKeyReadyCondition,
+			Status: metav1.ConditionTrue,
+			Reason: infrastructurev1beta2.ClusterAvailableReason,
+		})
+		if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+			log.Error(patchErr, "Failed to patch cluster status")
+		}
+		log.Info("Using SSH key", "sshKeyName", sshKey.Name, "sshKeyId", sshKey.SecretId)
+	}
+	// else {
+	// TODO: Check if SSH key configuration matches spec and update if necessary
+	// }
 
 	return ctrl.Result{}, nil
 }
@@ -206,10 +389,125 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, cluster 
 
 	log.Info("Reconciling ContaboCluster delete")
 
+	// Update cluster condition
+	meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.ClusterReadyCondition,
+		Status: metav1.ConditionFalse,
+		Reason: infrastructurev1beta2.ClusterDeletingReason,
+	})
+	if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+		log.Error(patchErr, "Failed to patch cluster status")
+	}
+	log.Info("Cluster marked for deletion, proceeding with resource cleanup")
+
 	// Delete network infrastructure
-	if err := r.deleteNetwork(ctx, contaboCluster); err != nil {
-		log.Error(err, "failed to delete network")
-		return ctrl.Result{}, err
+	if contaboCluster.Status.PrivateNetwork != nil {
+		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+			Type:   infrastructurev1beta2.ClusterPrivateNetworkReadyCondition,
+			Status: metav1.ConditionFalse,
+			Reason: infrastructurev1beta2.ClusterPrivateNetworkDeletingReason,
+		})
+		if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+			log.Error(patchErr, "Failed to patch cluster status")
+		}
+		log.Info("Deleting private network", "privateNetworkId", contaboCluster.Status.PrivateNetwork.PrivateNetworkId)
+		// Check if private network exists in Contabo API
+		resp, err := r.ContaboClient.RetrievePrivateNetworkWithResponse(ctx, contaboCluster.Status.PrivateNetwork.PrivateNetworkId, nil)
+		if err != nil || resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
+			// If the private network is not found, we can assume it has already been deleted
+			log.Info("Private network not found in Contabo API, assuming already deleted", "privateNetworkId", contaboCluster.Status.PrivateNetwork.PrivateNetworkId)
+		} else {
+			privateNetwork := resp.JSON200.Data[0]
+
+			// Unassign all instances from the private network
+			if len(privateNetwork.Instances) > 0 {
+				for _, instance := range privateNetwork.Instances {
+					if _, err := r.ContaboClient.UnassignInstancePrivateNetwork(ctx, contaboCluster.Status.PrivateNetwork.PrivateNetworkId, instance.InstanceId, nil); err != nil {
+						message := "Failed to unassign instances from private network"
+						meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+							Type:    infrastructurev1beta2.ClusterPrivateNetworkReadyCondition,
+							Status:  metav1.ConditionFalse,
+							Reason:  infrastructurev1beta2.ClusterPrivateNetworkFailedReason,
+							Message: message,
+						})
+						if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+							log.Error(patchErr, "Failed to patch cluster status")
+						}
+						log.Error(err, message)
+						return ctrl.Result{RequeueAfter: 5 * time.Second}, err
+					}
+					log.Info("Unassigned instance from private network", "instanceID", instance.InstanceId, "privateNetworkId", privateNetwork.PrivateNetworkId)
+				}
+			}
+
+			// Delete private network
+			if _, err := r.ContaboClient.DeletePrivateNetwork(ctx, privateNetwork.PrivateNetworkId, nil); err != nil {
+				message := "Failed to delete private network"
+				meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+					Type:    infrastructurev1beta2.ClusterPrivateNetworkReadyCondition,
+					Status:  metav1.ConditionFalse,
+					Reason:  infrastructurev1beta2.ClusterPrivateNetworkFailedReason,
+					Message: message,
+				})
+				if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+					log.Error(patchErr, "Failed to patch cluster status")
+				}
+				log.Error(err, message)
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, err
+			}
+
+			// Update status to remove private network
+			contaboCluster.Status.PrivateNetwork = nil
+			meta.RemoveStatusCondition(&contaboCluster.Status.Conditions, infrastructurev1beta2.ClusterPrivateNetworkReadyCondition)
+			if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+				log.Error(patchErr, "Failed to patch cluster status")
+			}
+			log.Info("Deleted private network", "privateNetworkId", privateNetwork.PrivateNetworkId)
+		}
+	}
+
+	// Delete Ssh Key
+	if contaboCluster.Status.SshKey != nil {
+		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+			Type:   infrastructurev1beta2.ClusterSshKeyReadyCondition,
+			Status: metav1.ConditionFalse,
+			Reason: infrastructurev1beta2.ClusterSshKeyDeletingReason,
+		})
+		if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+			log.Error(patchErr, "Failed to patch cluster status")
+		}
+		log.Info("Deleting SSH key", "sshKeyID", contaboCluster.Status.SshKey.SecretId)
+
+		// Check if SSH key exists in Contabo API
+		resp, err := r.ContaboClient.RetrieveSecretWithResponse(ctx, contaboCluster.Status.SshKey.SecretId, nil)
+		if err != nil || resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
+			// If the SSH key is not found, we can assume it has already been deleted
+			log.Info("SSH key not found in Contabo API, assuming already deleted", "sshKeyID", contaboCluster.Status.SshKey.SecretId)
+		} else {
+			// Delete SSH key
+			if _, err := r.ContaboClient.DeleteSecret(ctx, contaboCluster.Status.SshKey.SecretId, nil); err != nil {
+				message := "Failed to delete SSH key"
+				meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+					Type:    infrastructurev1beta2.ClusterSshKeyReadyCondition,
+					Status:  metav1.ConditionFalse,
+					Reason:  infrastructurev1beta2.ClusterSshKeyFailedReason,
+					Message: message,
+				})
+				if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+					log.Error(patchErr, "Failed to patch cluster status")
+				}
+				log.Error(err, message)
+				return ctrl.Result{}, err
+			}
+		}
+
+		// Update status to remove SSH key
+		contaboCluster.Status.SshKey = nil
+		meta.RemoveStatusCondition(&contaboCluster.Status.Conditions, infrastructurev1beta2.ClusterSshKeyReadyCondition)
+		if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+			log.Error(patchErr, "Failed to patch cluster status")
+		}
+		log.Info("Deleted SSH key", "sshKeyID", contaboCluster.Status.SshKey.SecretId)
 	}
 
 	// Remove our finalizer from the list and update it.
@@ -231,4 +529,31 @@ func (r *ContaboClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		).
 		Named("contabocluster").
 		Complete(r)
+}
+
+func generateSSHKeyPair() (privateKey string, publicKey string, err error) {
+	// Generate a new RSA private key
+	privateKeyRsa, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate private key: %w", err)
+	}
+
+	// Generate the public key from the private key
+	publicKeySsh, err := ssh.NewPublicKey(&privateKey)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate public key: %w", err)
+	}
+
+	// Marshal the private key to PEM format
+	privateKeyRsaPEM := &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKeyRsa),
+	}
+	privateKey = string(pem.EncodeToMemory(privateKeyRsaPEM))
+
+	// Marshal the public key to OpenSSH format
+	publicKey = string(ssh.MarshalAuthorizedKey(publicKeySsh))
+
+	fmt.Println("SSH key pair generated: id_rsa (private), id_rsa.pub (public)")
+	return privateKey, publicKey, nil
 }

@@ -494,7 +494,7 @@ type AddOnRequest struct {
 	// Id Id of the Addon. Please refer to list [here](https://contabo.com/en/product-list/?show_ids=true).
 	Id int64 `json:"id"`
 
-	// Quantity The number of Addons you wish to aquire.
+	// Quantity The number of Addons you wish to acquire.
 	Quantity int64 `json:"quantity"`
 }
 
@@ -503,7 +503,7 @@ type AddOnResponse struct {
 	// Id Id of the Addon. Please refer to list [here](https://contabo.com/en/product-list/?show_ids=true).
 	Id int64 `json:"id"`
 
-	// Quantity The number of Addons you wish to aquire.
+	// Quantity The number of Addons you wish to acquire.
 	Quantity int64 `json:"quantity"`
 }
 
