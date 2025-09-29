@@ -94,7 +94,7 @@ type ContaboMachineStatus struct {
 type ContaboInstanceSpec struct {
 	// ProductID is the Contabo product ID (instance type)
 	// +kubebuilder:validation:Required
-	ProductID string `json:"productID"`
+	ProductId string `json:"productId"`
 }
 
 // ContaboInstanceStatus defines the observed state of a Contabo instance

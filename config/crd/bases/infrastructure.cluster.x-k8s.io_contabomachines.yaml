@@ -69,11 +69,11 @@ spec:
               instance:
                 description: Instance is the type of instance to create.
                 properties:
-                  productID:
+                  productId:
                     description: ProductID is the Contabo product ID (instance type)
                     type: string
                 required:
-                - productID
+                - productId
                 type: object
               providerID:
                 description: ProviderID is the unique identifier as specified by the

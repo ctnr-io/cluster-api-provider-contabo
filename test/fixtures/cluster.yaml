@@ -24,11 +24,6 @@ apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
 metadata:
   name: test-control-plane
   namespace: contabo-e2e-test
-spec:
-  joinConfiguration:
-  controlPlane:
-    localAPIEndpoint:
-  advertiseAddress: 10.0.0.100
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ContaboMachine
@@ -46,10 +41,17 @@ metadata:
   namespace: contabo-e2e-test
   labels:
     cluster.x-k8s.io/cluster-name: test-cluster
-    cluster.x-k8s.io/control-plane: ""
+    cluster.x-k8s.io/control-plane: "true"
+    set: control-plane
 spec:
   clusterName: test-cluster
   infrastructureRef:
     apiGroup: infrastructure.cluster.x-k8s.io
     kind: ContaboMachine
     name: test-control-plane
+  bootstrap:
+    configRef:
+      apiGroup: bootstrap.cluster.x-k8s.io
+      kind: KubeadmConfig
+      name: test-control-plane
+  version: v1.34.1

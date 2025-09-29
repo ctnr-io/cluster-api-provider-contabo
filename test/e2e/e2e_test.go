@@ -78,33 +78,33 @@ var _ = Describe("Manager", Ordered, func() {
 	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,
 	// and deleting the namespace.
 	AfterAll(func() {
-		By("cleaning up the curl pod for metrics")
-		cmd := exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace)
-		_, _ = utils.Run(cmd)
-
-		By("cleaning up the metrics ClusterRoleBinding")
-		cmd = exec.Command("kubectl", "delete", "clusterrolebinding", metricsRoleBindingName, "--ignore-not-found=true")
-		_, _ = utils.Run(cmd)
-
-		// By("cleaning up CAPI core components")
-		// clusterctlPath := os.Getenv("CLUSTERCTL")
-		// if clusterctlPath == "" {
-		//   clusterctlPath = "clusterctl" // fallback to system clusterctl
-		// }
-		// cmd = exec.Command(clusterctlPath, "delete", "--all", "--include-crd", "--include-namespace")
+		// By("cleaning up the curl pod for metrics")
+		// cmd := exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace)
 		// _, _ = utils.Run(cmd)
 
-		By("undeploying the controller-manager")
-		cmd = exec.Command("make", "undeploy")
-		_, _ = utils.Run(cmd)
+		// By("cleaning up the metrics ClusterRoleBinding")
+		// cmd = exec.Command("kubectl", "delete", "clusterrolebinding", metricsRoleBindingName, "--ignore-not-found=true")
+		// _, _ = utils.Run(cmd)
 
-		By("uninstalling CRDs")
-		cmd = exec.Command("make", "uninstall")
-		_, _ = utils.Run(cmd)
+		// // By("cleaning up CAPI core components")
+		// // clusterctlPath := os.Getenv("CLUSTERCTL")
+		// // if clusterctlPath == "" {
+		// //   clusterctlPath = "clusterctl" // fallback to system clusterctl
+		// // }
+		// // cmd = exec.Command(clusterctlPath, "delete", "--all", "--include-crd", "--include-namespace")
+		// // _, _ = utils.Run(cmd)
 
-		By("removing manager namespace")
-		cmd = exec.Command("kubectl", "delete", "ns", namespace)
-		_, _ = utils.Run(cmd)
+		// By("undeploying the controller-manager")
+		// cmd = exec.Command("make", "undeploy")
+		// _, _ = utils.Run(cmd)
+
+		// By("uninstalling CRDs")
+		// cmd = exec.Command("make", "uninstall")
+		// _, _ = utils.Run(cmd)
+
+		// By("removing manager namespace")
+		// cmd = exec.Command("kubectl", "delete", "ns", namespace)
+		// _, _ = utils.Run(cmd)
 	})
 
 	// After each test, check for failures and collect logs, events,

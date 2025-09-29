@@ -131,11 +131,34 @@ var _ = AfterSuite(func() {
 	cmd = exec.Command("clusterctl", "delete", "--all", "--include-crd", "--include-namespace", "--ignore-not-found=true")
 	_, _ = utils.Run(cmd)
 
-	cmd = exec.Command("kubectl", "get", "validatingwebhookconfigurations", "-o", "name")
-	if output, err := utils.Run(cmd); err == nil {
-		_, _ = fmt.Fprintf(GinkgoWriter, "Webhook configurations:\n%s\n", output)
-	}
+	By("cleaning up the curl pod for metrics")
+	cmd = exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace)
+	_, _ = utils.Run(cmd)
 
+	By("cleaning up the metrics ClusterRoleBinding")
+	cmd = exec.Command("kubectl", "delete", "clusterrolebinding", metricsRoleBindingName, "--ignore-not-found=true")
+	_, _ = utils.Run(cmd)
+
+	// By("cleaning up CAPI core components")
+	// clusterctlPath := os.Getenv("CLUSTERCTL")
+	// if clusterctlPath == "" {
+	//   clusterctlPath = "clusterctl" // fallback to system clusterctl
+	// }
+	// cmd = exec.Command(clusterctlPath, "delete", "--all", "--include-crd", "--include-namespace")
+	// _, _ = utils.Run(cmd)
+
+	By("undeploying the controller-manager")
+	cmd = exec.Command("make", "undeploy")
+	_, _ = utils.Run(cmd)
+
+	By("uninstalling CRDs")
+	cmd = exec.Command("make", "uninstall")
+	_, _ = utils.Run(cmd)
+
+	By("removing manager namespace")
+	cmd = exec.Command("kubectl", "delete", "ns", namespace)
+	_, _ = utils.Run(cmd)
+	
 	// // Teardown CertManager after the suite if not skipped and if it was not already installed
 	// if !skipCertManagerInstall && !isCertManagerAlreadyInstalled {
 	// 	_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CertManager...\n")

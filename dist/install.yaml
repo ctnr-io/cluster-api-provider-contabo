@@ -35,9 +35,9 @@ spec:
       jsonPath: .status.ready
       name: Ready
       type: string
-    - description: VPC ID
-      jsonPath: .status.network.vpcId
-      name: VPC
+    - description: Private Networks
+      jsonPath: .status.privateNetworks[].name
+      name: Private Networks
       type: string
     - description: API Endpoint
       jsonPath: .spec.controlPlaneEndpoint.host
@@ -86,36 +86,26 @@ spec:
                     minimum: 1
                     type: integer
                 type: object
-              network:
-                description: Network configuration for the cluster
+              privateNetworks:
+                description: PrivateNetwork specifies the private network configuration
+                  for the cluster.
                 properties:
-                  privateNetworks:
-                    description: |-
-                      PrivateNetworks is a list of private network names to use for the cluster
-                      The CIDR and datacenter information will be populated in the status after discovery
-                    items:
-                      description: ContaboPrivateNetworkSpec defines a private network
-                        configuration
-                      properties:
-                        name:
-                          description: Name of the private network to use (must exist
-                            in Contabo)
-                          type: string
-                      required:
-                      - name
-                      type: object
-                    type: array
+                  region:
+                    description: Region Region where the Private Network should be
+                      located. Default is `EU`
+                    type: string
+                required:
+                - region
                 type: object
-              region:
-                description: Region is the Contabo region where the cluster will be
-                  deployed
-                type: string
             required:
-            - region
+            - privateNetworks
             type: object
           status:
             description: status defines the observed state of ContaboCluster
             properties:
+              clusterID:
+                description: ClusterUUID is the identifier of the Contabo cluster.
+                type: string
               conditions:
                 description: Conditions defines current service state of the ContaboCluster.
                 items:
@@ -200,60 +190,189 @@ spec:
                   - name
                   type: object
                 type: array
-              network:
-                description: Network describes the cluster network configuration
+              privateNetworks:
+                description: PrivateNetwork contains the discovered information about
+                  private networks
                 properties:
+                  availableIps:
+                    description: AvailableIps The total available IPs of the Private
+                      Network
+                    format: int64
+                    type: integer
+                  cidr:
+                    description: Cidr The cidr range of the Private Network
+                    type: string
+                  createdDate:
+                    description: CreatedDate The creation date of the Private Network
+                    format: int64
+                    type: integer
+                  customerId:
+                    description: CustomerId Your customer number
+                    type: string
                   dataCenter:
-                    description: |-
-                      DataCenter contains information about the datacenter where resources are located
-                      This is populated after instances are created and their datacenter is discovered
-                    properties:
-                      code:
-                        description: Code of the datacenter (e.g., "EU")
-                        type: string
-                      name:
-                        description: Name of the datacenter (e.g., "European Union
-                          (Germany)")
-                        type: string
-                    required:
-                    - code
-                    - name
-                    type: object
-                  privateNetworks:
-                    description: PrivateNetworks contains the discovered information
-                      about private networks
+                    description: DataCenter The data center where your Private Network
+                      is located
+                    type: string
+                  description:
+                    description: Description The description of the Private Network
+                    type: string
+                  instances:
                     items:
-                      description: ContaboPrivateNetworkStatus defines the status
-                        of a private network
+                      description: Instances defines model for Instances.
                       properties:
-                        cidr:
-                          description: CIDR block of the private network (discovered
-                            from Contabo)
+                        displayName:
+                          description: DisplayName Instance display name
                           type: string
-                        dataCenter:
-                          description: DataCenter where this private network is located
+                        errorMessage:
+                          description: ErrorMessage Message in case of an error.
                           type: string
-                        id:
-                          description: ID of the private network in Contabo
-                          type: string
+                        instanceId:
+                          description: InstanceId Instance id
+                          format: int64
+                          type: integer
+                        ipConfig:
+                          description: IpConfig defines model for IpConfig.
+                          properties:
+                            v4:
+                              description: IpV4 defines model for IpV4.
+                              properties:
+                                gateway:
+                                  description: Gateway Gateway
+                                  type: string
+                                ip:
+                                  description: Ip IP Address
+                                  type: string
+                                netmaskCidr:
+                                  description: NetmaskCidr Netmask CIDR
+                                  format: int32
+                                  type: integer
+                              required:
+                              - gateway
+                              - ip
+                              - netmaskCidr
+                              type: object
+                            v6:
+                              description: IpV6 defines model for IpV6.
+                              properties:
+                                gateway:
+                                  description: Gateway Gateway
+                                  type: string
+                                ip:
+                                  description: Ip IP Address
+                                  type: string
+                                netmaskCidr:
+                                  description: NetmaskCidr Netmask CIDR
+                                  format: int32
+                                  type: integer
+                              required:
+                              - gateway
+                              - ip
+                              - netmaskCidr
+                              type: object
+                          required:
+                          - v4
+                          - v6
+                          type: object
                         name:
-                          description: Name of the private network
+                          description: Name Instance name
                           type: string
-                        region:
-                          description: Region where this private network is located
+                        privateIpConfig:
+                          description: PrivateIpConfig defines model for PrivateIpConfig.
+                          properties:
+                            v4:
+                              items:
+                                description: IpV4 defines model for IpV4.
+                                properties:
+                                  gateway:
+                                    description: Gateway Gateway
+                                    type: string
+                                  ip:
+                                    description: Ip IP Address
+                                    type: string
+                                  netmaskCidr:
+                                    description: NetmaskCidr Netmask CIDR
+                                    format: int32
+                                    type: integer
+                                required:
+                                - gateway
+                                - ip
+                                - netmaskCidr
+                                type: object
+                              type: array
+                          required:
+                          - v4
+                          type: object
+                        productId:
+                          description: ProductId Product id
+                          type: string
+                        status:
+                          description: Status State of the instance in the Private
+                            Network
                           type: string
                       required:
-                      - cidr
-                      - dataCenter
-                      - id
+                      - displayName
+                      - instanceId
+                      - ipConfig
                       - name
-                      - region
+                      - privateIpConfig
+                      - productId
+                      - status
                       type: object
                     type: array
+                  name:
+                    description: Name The name of the Private Network
+                    type: string
+                  privateNetworkId:
+                    description: PrivateNetworkId Private Network's id
+                    format: int64
+                    type: integer
+                  region:
+                    description: Region The slug of the region where your Private
+                      Network is located
+                    type: string
+                  regionName:
+                    description: RegionName The region where your Private Network
+                      is located
+                    type: string
+                  tenantId:
+                    description: TenantId Your customer tenant id
+                    type: string
+                required:
+                - availableIps
+                - cidr
+                - createdDate
+                - customerId
+                - dataCenter
+                - description
+                - instances
+                - name
+                - privateNetworkId
+                - region
+                - regionName
+                - tenantId
                 type: object
               ready:
                 description: Ready denotes that the cluster (infrastructure) is ready.
                 type: boolean
+              secrets:
+                description: SshKey contains the references to secrets used by the
+                  machine.
+                properties:
+                  name:
+                    description: Name is the name of the SSH key
+                    type: string
+                  secretId:
+                    description: SecretId is the ID of the SSH key in Contabo
+                    format: int64
+                    type: integer
+                  value:
+                    description: Value is the actual SSH public key value
+                    type: string
+                required:
+                - name
+                - secretId
+                - value
+                type: object
             type: object
         required:
         - spec
@@ -332,57 +451,21 @@ spec:
           spec:
             description: spec defines the desired state of ContaboMachine
             properties:
-              additionalMetadata:
-                additionalProperties:
-                  type: string
-                description: AdditionalMetadata is additional metadata to be added
-                  to the machine.
-                type: object
-              additionalTags:
-                additionalProperties:
-                  type: string
-                description: AdditionalTags is additional tags to be added to the
-                  machine.
-                type: object
-              instanceType:
-                description: InstanceType is the Contabo instance type for the machine.
-                type: string
-              network:
-                description: Network configuration for the machine
+              instance:
+                description: Instance is the type of instance to create.
                 properties:
-                  privateIP:
-                    description: PrivateIP is the private IP address to assign to
-                      the machine
+                  productId:
+                    description: ProductID is the Contabo product ID (instance type)
                     type: string
-                  publicIP:
-                    description: PublicIP specifies whether to assign a public IP
-                      to the machine
-                    type: boolean
-                  subnetName:
-                    description: SubnetName is the name of the subnet to place the
-                      machine in
-                    type: string
+                required:
+                - productId
                 type: object
               providerID:
                 description: ProviderID is the unique identifier as specified by the
                   cloud provider.
                 type: string
-              region:
-                description: Region is the Contabo region where the machine will be
-                  created.
-                type: string
-              sshKeys:
-                description: SSHKeys is a list of SSH key names to be added to the
-                  machine.
-                items:
-                  type: string
-                type: array
-              userData:
-                description: UserData is the cloud-init user data to use for the machine.
-                type: string
             required:
-            - instanceType
-            - region
+            - instance
             type: object
           status:
             description: status defines the observed state of ContaboMachine
@@ -508,21 +591,222 @@ spec:
                   can be added as events to the Machine object and/or logged in the
                   controller's output.
                 type: string
-              instanceState:
-                description: InstanceState is the state of the Contabo instance.
-                type: string
-              network:
-                description: Network describes the machine network configuration
+              instance:
+                description: Instance is the current state of the Contabo instance.
                 properties:
-                  privateIP:
-                    description: PrivateIP is the private IP address of the machine
+                  addOns:
+                    items:
+                      description: AddOnResponse defines model for AddOnResponse.
+                      properties:
+                        id:
+                          description: Id Id of the Addon. Please refer to list [here](https://contabo.com/en/product-list/?show_ids=true).
+                          format: int64
+                          type: integer
+                        quantity:
+                          description: Quantity The number of Addons you wish to acquire.
+                          format: int64
+                          type: integer
+                      required:
+                      - id
+                      - quantity
+                      type: object
+                    type: array
+                  additionalIps:
+                    items:
+                      description: AdditionalIp defines model for AdditionalIp.
+                      properties:
+                        v4:
+                          description: IpV4 defines model for IpV4.
+                          properties:
+                            gateway:
+                              description: Gateway Gateway
+                              type: string
+                            ip:
+                              description: Ip IP Address
+                              type: string
+                            netmaskCidr:
+                              description: NetmaskCidr Netmask CIDR
+                              format: int32
+                              type: integer
+                          required:
+                          - gateway
+                          - ip
+                          - netmaskCidr
+                          type: object
+                      required:
+                      - v4
+                      type: object
+                    type: array
+                  cancelDate:
+                    description: CancelDate The date on which the instance will be
+                      cancelled
                     type: string
-                  publicIP:
-                    description: PublicIP is the public IP address of the machine
+                  cpuCores:
+                    description: CpuCores CPU core count
+                    format: int64
+                    type: integer
+                  createdDate:
+                    description: CreatedDate The creation date for the instance
+                    format: int64
+                    type: integer
+                  customerId:
+                    description: CustomerId Customer ID
                     type: string
-                  subnetID:
-                    description: SubnetID is the ID of the subnet the machine is in
+                  dataCenter:
+                    description: DataCenter The data center where your Private Network
+                      is located
                     type: string
+                  defaultUser:
+                    description: DefaultUser Default user name created for login during
+                      (re-)installation with administrative privileges. Allowed values
+                      for Linux/BSD are `admin` (use sudo to apply administrative
+                      privileges like root) or `root`. Allowed values for Windows
+                      are `admin` (has administrative privileges like administrator)
+                      or `administrator`.
+                    type: string
+                  diskMb:
+                    description: DiskMb Image Disk size in MB
+                    type: number
+                  displayName:
+                    description: DisplayName Instance display name
+                    type: string
+                  errorMessage:
+                    description: ErrorMessage Message in case of an error.
+                    type: string
+                  imageId:
+                    description: ImageId Image's id
+                    type: string
+                  instanceId:
+                    description: InstanceId Instance ID
+                    format: int64
+                    type: integer
+                  ipConfig:
+                    description: IpConfig defines model for IpConfig.
+                    properties:
+                      v4:
+                        description: IpV4 defines model for IpV4.
+                        properties:
+                          gateway:
+                            description: Gateway Gateway
+                            type: string
+                          ip:
+                            description: Ip IP Address
+                            type: string
+                          netmaskCidr:
+                            description: NetmaskCidr Netmask CIDR
+                            format: int32
+                            type: integer
+                        required:
+                        - gateway
+                        - ip
+                        - netmaskCidr
+                        type: object
+                      v6:
+                        description: IpV6 defines model for IpV6.
+                        properties:
+                          gateway:
+                            description: Gateway Gateway
+                            type: string
+                          ip:
+                            description: Ip IP Address
+                            type: string
+                          netmaskCidr:
+                            description: NetmaskCidr Netmask CIDR
+                            format: int32
+                            type: integer
+                        required:
+                        - gateway
+                        - ip
+                        - netmaskCidr
+                        type: object
+                    required:
+                    - v4
+                    - v6
+                    type: object
+                  macAddress:
+                    description: MacAddress MAC Address
+                    type: string
+                  name:
+                    description: Name Instance Name
+                    type: string
+                  osType:
+                    description: OsType Type of operating system (OS)
+                    type: string
+                  productId:
+                    description: ProductId Product ID
+                    type: string
+                  productName:
+                    description: ProductName Instance's Product Name
+                    type: string
+                  productType:
+                    description: ProductType Instance's category depending on Product
+                      Id
+                    type: string
+                  ramMb:
+                    description: RamMb Image RAM size in MB
+                    type: number
+                  region:
+                    description: Region Instance region where the compute instance
+                      should be located.
+                    type: string
+                  regionName:
+                    description: RegionName The name of the region where the instance
+                      is located.
+                    type: string
+                  sshKeys:
+                    description: SshKeys Array of `secretId`s of public SSH keys for
+                      logging into as `defaultUser` with administrator/root privileges.
+                      Applies to Linux/BSD systems. Please refer to Secrets Management
+                      API.
+                    items:
+                      format: int64
+                      type: integer
+                    type: array
+                  status:
+                    description: Status Instance's status
+                    type: string
+                  tenantId:
+                    description: TenantId Your customer tenant id
+                    type: string
+                  vHostId:
+                    description: VHostId ID of host system
+                    format: int64
+                    type: integer
+                  vHostName:
+                    description: VHostName Name of host system
+                    type: string
+                  vHostNumber:
+                    description: VHostNumber Number of host system
+                    format: int64
+                    type: integer
+                required:
+                - addOns
+                - additionalIps
+                - cancelDate
+                - cpuCores
+                - createdDate
+                - customerId
+                - dataCenter
+                - diskMb
+                - displayName
+                - imageId
+                - instanceId
+                - ipConfig
+                - macAddress
+                - name
+                - osType
+                - productId
+                - productName
+                - productType
+                - ramMb
+                - region
+                - regionName
+                - sshKeys
+                - status
+                - tenantId
+                - vHostId
+                - vHostName
+                - vHostNumber
                 type: object
               ready:
                 description: Ready is true when the provider resource is ready.
@@ -593,59 +877,22 @@ spec:
                   spec:
                     description: ContaboMachineSpec defines the desired state of ContaboMachine
                     properties:
-                      additionalMetadata:
-                        additionalProperties:
-                          type: string
-                        description: AdditionalMetadata is additional metadata to
-                          be added to the machine.
-                        type: object
-                      additionalTags:
-                        additionalProperties:
-                          type: string
-                        description: AdditionalTags is additional tags to be added
-                          to the machine.
-                        type: object
-                      instanceType:
-                        description: InstanceType is the Contabo instance type for
-                          the machine.
-                        type: string
-                      network:
-                        description: Network configuration for the machine
+                      instance:
+                        description: Instance is the type of instance to create.
                         properties:
-                          privateIP:
-                            description: PrivateIP is the private IP address to assign
-                              to the machine
+                          productId:
+                            description: ProductID is the Contabo product ID (instance
+                              type)
                             type: string
-                          publicIP:
-                            description: PublicIP specifies whether to assign a public
-                              IP to the machine
-                            type: boolean
-                          subnetName:
-                            description: SubnetName is the name of the subnet to place
-                              the machine in
-                            type: string
+                        required:
+                        - productId
                         type: object
                       providerID:
                         description: ProviderID is the unique identifier as specified
                           by the cloud provider.
                         type: string
-                      region:
-                        description: Region is the Contabo region where the machine
-                          will be created.
-                        type: string
-                      sshKeys:
-                        description: SSHKeys is a list of SSH key names to be added
-                          to the machine.
-                        items:
-                          type: string
-                        type: array
-                      userData:
-                        description: UserData is the cloud-init user data to use for
-                          the machine.
-                        type: string
                     required:
-                    - instanceType
-                    - region
+                    - instance
                     type: object
                 required:
                 - spec
@@ -933,6 +1180,7 @@ rules:
   resources:
   - secrets
   verbs:
+  - create
   - get
   - list
   - watch

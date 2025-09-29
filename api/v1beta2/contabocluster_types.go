@@ -113,7 +113,7 @@ type ContaboCluster struct {
 
 	// status defines the observed state of ContaboCluster
 	// +optional
-	Status *ContaboClusterStatus `json:"status,omitempty,omitzero"`
+	Status ContaboClusterStatus `json:"status,omitempty,omitzero"`
 }
 
 // +kubebuilder:object:root=true
