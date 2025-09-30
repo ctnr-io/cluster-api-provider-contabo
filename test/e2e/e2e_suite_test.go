@@ -57,42 +57,6 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	By("building the manager(Operator) image and loading into Kind")
-	cmd := exec.Command("make", "docker-build-kind", fmt.Sprintf("IMG=%s", projectImage))
-	_, err := utils.Run(cmd)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build and load the manager(Operator) image")
-
-	// The tests-e2e are intended to run on a temporary cluster that is created and destroyed for testing.
-	// To prevent errors when tests run in environments with CertManager already installed,
-	// we check for its presence before execution.
-	if !skipCertManagerInstall {
-		By("checking if cert manager is installed already")
-		isCertManagerAlreadyInstalled = utils.IsCertManagerCRDsInstalled()
-		if !isCertManagerAlreadyInstalled {
-			_, _ = fmt.Fprintf(GinkgoWriter, "Installing CertManager...\n")
-			Expect(utils.InstallCertManager()).To(Succeed(), "Failed to install CertManager")
-		} else {
-			_, _ = fmt.Fprintf(GinkgoWriter, "WARNING: CertManager is already installed. Skipping installation...\n")
-		}
-	}
-
-	By("installing Cluster API core components")
-	clusterctlPath := os.Getenv("CLUSTERCTL")
-	if clusterctlPath == "" {
-		clusterctlPath = "clusterctl" // fallback to system clusterctl
-	}
-
-	// // Clean up any existing CAPI installations first
-	// cmd = exec.Command(clusterctlPath, "delete", "--all", "--include-crd", "--include-namespace")
-	// _, _ = utils.Run(cmd) // Ignore errors if nothing exists
-
-	// Initialize with latest version that supports v1beta2
-	cmd = exec.Command(clusterctlPath, "init", "--core", "cluster-api", "--bootstrap", "kubeadm")
-	_, err = utils.Run(cmd)
-	Expect(err).NotTo(HaveOccurred(), "Failed to install CAPI core components")
-})
-
-var _ = AfterSuite(func() {
 	// Clean up any remaining Cluster API resources before uninstalling operators
 	_, _ = fmt.Fprintf(GinkgoWriter, "Cleaning up remaining Cluster API resources...\n")
 
@@ -126,6 +90,7 @@ var _ = AfterSuite(func() {
 
 	cmd = exec.Command("kubectl", "patch", "machinesets", "--all", "--all-namespaces", "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
 	_, _ = utils.Run(cmd)
+
 
 	// Remove clusterctl artifacts if any
 	cmd = exec.Command("clusterctl", "delete", "--all", "--include-crd", "--include-namespace", "--ignore-not-found=true")
@@ -164,4 +129,43 @@ var _ = AfterSuite(func() {
 	// 	_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CertManager...\n")
 	// 	utils.UninstallCertManager()
 	// }
+
+
+	By("building the manager(Operator) image and loading into Kind")
+	cmd = exec.Command("make", "docker-build-kind", fmt.Sprintf("IMG=%s", projectImage))
+	_, err := utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build and load the manager(Operator) image")
+
+	// The tests-e2e are intended to run on a temporary cluster that is created and destroyed for testing.
+	// To prevent errors when tests run in environments with CertManager already installed,
+	// we check for its presence before execution.
+	if !skipCertManagerInstall {
+		By("checking if cert manager is installed already")
+		isCertManagerAlreadyInstalled = utils.IsCertManagerCRDsInstalled()
+		if !isCertManagerAlreadyInstalled {
+			_, _ = fmt.Fprintf(GinkgoWriter, "Installing CertManager...\n")
+			Expect(utils.InstallCertManager()).To(Succeed(), "Failed to install CertManager")
+		} else {
+			_, _ = fmt.Fprintf(GinkgoWriter, "WARNING: CertManager is already installed. Skipping installation...\n")
+		}
+	}
+
+	By("installing Cluster API core components")
+	clusterctlPath := os.Getenv("CLUSTERCTL")
+	if clusterctlPath == "" {
+		clusterctlPath = "clusterctl" // fallback to system clusterctl
+	}
+
+	// // Clean up any existing CAPI installations first
+	// cmd = exec.Command(clusterctlPath, "delete", "--all", "--include-crd", "--include-namespace")
+	// _, _ = utils.Run(cmd) // Ignore errors if nothing exists
+
+	// Initialize with latest version that supports v1beta2
+	cmd = exec.Command(clusterctlPath, "init", "--core", "cluster-api", "--bootstrap", "kubeadm")
+	_, err = utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Failed to install CAPI core components")
+})
+
+var _ = AfterSuite(func() {
+
 })

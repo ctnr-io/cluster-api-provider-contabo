@@ -14136,7 +14136,6 @@ func ParseRetrieveInstancesListResponse(rsp *http.Response) (*RetrieveInstancesL
 	if err != nil {
 		return nil, err
 	}
-
 	response := &RetrieveInstancesListResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,

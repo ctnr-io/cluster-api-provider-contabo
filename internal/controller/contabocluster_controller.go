@@ -117,10 +117,10 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Handle non-deleted clusters
-	return ctrl.Result{}, r.reconcileApply(ctx, contaboCluster)
+	return r.reconcileApply(ctx, contaboCluster)
 }
 
-func (r *ContaboClusterReconciler) reconcileApply(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
+func (r *ContaboClusterReconciler) reconcileApply(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	log.Info("Starting ContaboCluster reconciliation state machine", "cluster", contaboCluster.Name)
@@ -133,34 +133,42 @@ func (r *ContaboClusterReconciler) reconcileApply(ctx context.Context, contaboCl
 
 	// Check if private network was created
 	if err := r.reconcilePrivateNetwork(ctx, contaboCluster, clusterUUID); err != nil {
-		return err
+		return ctrl.Result{}, err
 	}
 
 	// Check if SSH key was created
 	if err := r.reconcileSSHKey(ctx, contaboCluster, clusterUUID); err != nil {
-		return err
+		return ctrl.Result{}, err
+	}
+
+	// Check if control plane endpoint is set
+	if result, err := r.reconcileControlPlaneEndpoint(ctx, contaboCluster); err != nil || result.RequeueAfter != 0 {
+		return result, err
 	}
 
 	// Mark cluster as ready if all components are ready
 	r.markClusterReady(ctx, contaboCluster)
 
-	return nil
+	return ctrl.Result{}, nil
 }
 
 // markClusterReady sets the ClusterReadyCondition to true if all components are ready
 func (r *ContaboClusterReconciler) markClusterReady(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) {
-	// log := logf.FromContext(ctx)
-	if contaboCluster.Status.PrivateNetwork != nil && contaboCluster.Status.SshKey != nil {
-		if !meta.IsStatusConditionTrue(contaboCluster.Status.Conditions, infrastructurev1beta2.ClusterReadyCondition) {
-			meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
-				Type:   infrastructurev1beta2.ClusterReadyCondition,
-				Status: metav1.ConditionTrue,
-				Reason: infrastructurev1beta2.ClusterAvailableReason,
-			})
-		}
-	}
+	log := logf.FromContext(ctx)
 
-	contaboCluster.Status.Ready = meta.IsStatusConditionTrue(contaboCluster.Status.Conditions, infrastructurev1beta2.ClusterReadyCondition)
+	log.Info("All components are ready, marking ContaboCluster as ready")
+
+	meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.ClusterReadyCondition,
+		Status: metav1.ConditionTrue,
+		Reason: infrastructurev1beta2.ClusterAvailableReason,
+	})
+
+	contaboCluster.Status.Ready = true
+
+	contaboCluster.Status.Initialization = &infrastructurev1beta2.ContaboClusterInitializationStatus{
+		Provisioned: true,
+	}
 	// if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
 	// 	log.Error(patchErr, "Failed to patch cluster status")
 	// }
@@ -212,14 +220,14 @@ func (r *ContaboClusterReconciler) reconcilePrivateNetwork(ctx context.Context, 
 	// Check if private network was created
 	if contaboCluster.Status.PrivateNetwork == nil {
 		var privateNetwork *models.PrivateNetworkResponse
-		privateNetworkName := fmt.Sprintf("capc %s %s %s", contaboCluster.Spec.PrivateNetwork.Region, contaboCluster.Name, clusterUUID)
+		privateNetworkName := fmt.Sprintf("[capc] %s %s", contaboCluster.Name, clusterUUID)
 
 		// Check if private network with the same name already exists in Contabo API
 		resp, _ := r.ContaboClient.RetrievePrivateNetworkListWithResponse(ctx, &models.RetrievePrivateNetworkListParams{
 			Name: &privateNetworkName,
 		})
 
-		if resp != nil && resp.JSON200.Data != nil && len(resp.JSON200.Data) > 0 {
+		if resp != nil && resp.JSON200 != nil && resp.JSON200.Data != nil && len(resp.JSON200.Data) > 0 {
 			privateNetwork = (*models.PrivateNetworkResponse)(&resp.JSON200.Data[0])
 		} else {
 			log.Info("Private network not found in Contabo API, creating new one", "privateNetworkName", privateNetworkName)
@@ -283,14 +291,15 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 	// Check if SSH key was created
 	if contaboCluster.Status.SshKey == nil {
 		var sshKey *models.SecretResponse
-		sshKeyName := fmt.Sprintf("capc-%s-%s", contaboCluster.Name, clusterUUID)
+		sshKeyName := fmt.Sprintf("[capc] %s %s", contaboCluster.Name, clusterUUID)
+		sshKeySecretName := fmt.Sprintf("capc-%s-%s", contaboCluster.Name, clusterUUID)
 
 		// Check if SSH key with the same name already exists in Contabo API
 		resp, _ := r.ContaboClient.RetrieveSecretListWithResponse(ctx, &models.RetrieveSecretListParams{
 			Name: &sshKeyName,
 		})
 
-		if resp != nil && resp.JSON200.Data != nil && len(resp.JSON200.Data) > 0 {
+		if resp != nil && resp.JSON200 != nil && resp.JSON200.Data != nil && len(resp.JSON200.Data) > 0 {
 			sshKey = &resp.JSON200.Data[0]
 		} else {
 			log.Info("SSH key not found in Contabo API, creating new one", "sshKeyName", sshKeyName)
@@ -314,7 +323,7 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 
 			// Delete secret if already exists
 			err = r.Get(ctx, client.ObjectKey{
-				Name:      sshKeyName,
+				Name:      sshKeySecretName,
 				Namespace: contaboCluster.Namespace,
 			}, &corev1.Secret{})
 			if err == nil {
@@ -340,7 +349,7 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 			// Create new secret
 			if err := r.Create(ctx, &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      sshKeyName,
+					Name:      sshKeySecretName,
 					Namespace: contaboCluster.Namespace,
 				},
 				Data: map[string][]byte{
@@ -398,6 +407,57 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 	// }
 
 	return nil
+}
+
+// reconcileControlPlaneEndpoint ensures the control plane endpoint is set
+func (r *ContaboClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	// TODO: Handle case where control plane endpoint is set but not reachable
+
+	// Check if control plane endpoint is set
+	if contaboCluster.Spec.ControlPlaneEndpoint != nil {
+		return ctrl.Result{}, nil
+	}
+
+	// Retrieve control plane endpoint from the first ContaboMachine in the cluster
+	machineList := &infrastructurev1beta2.ContaboMachineList{}
+	if err := r.List(ctx, machineList, client.InNamespace(contaboCluster.Namespace), client.MatchingLabels{
+		clusterv1.ClusterNameLabel:         contaboCluster.Name,
+		clusterv1.MachineControlPlaneLabel: "true",
+	}); err != nil || len(machineList.Items) == 0 {
+		log.Info("No control plane machines found yet, requeuing")
+		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+			Type:   clusterv1.ClusterControlPlaneAvailableCondition,
+			Status: metav1.ConditionFalse,
+			Reason: clusterv1.WaitingForControlPlaneInitializedReason,
+		})
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	firstControlPlaneMachine := machineList.Items[0]
+	if firstControlPlaneMachine.Status.Instance == nil || firstControlPlaneMachine.Status.Instance.IpConfig.V4.Ip == "" {
+		log.Info("Control plane machine instance or IP not yet available, requeuing", "machine", firstControlPlaneMachine.Name)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	// Set control plane endpoint
+	contaboCluster.Spec.ControlPlaneEndpoint = &clusterv1.APIEndpoint{
+		Host: firstControlPlaneMachine.Status.Instance.IpConfig.V4.Ip,
+		Port: 6443, // Default Kubernetes API server port
+	}
+
+	meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+		Type:   clusterv1.ClusterControlPlaneAvailableCondition,
+		Status: metav1.ConditionTrue,
+		Reason: clusterv1.ClusterControlPlaneMachinesReadyReason,
+	})
+	// if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+	// 	log.Error(patchErr, "Failed to patch cluster status")
+	// }
+	log.Info("Using control plane endpoint", "controlPlaneEndpoint", contaboCluster.Spec.ControlPlaneEndpoint)
+
+	return ctrl.Result{}, nil
 }
 
 // reconcileDelete may return different ctrl.Result values in future implementations
@@ -508,13 +568,14 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 		}
 
 		// Update status to remove SSH key
+		sshKeyName := contaboCluster.Status.SshKey.Name
 		contaboCluster.Status.SshKey = nil
 		// This fail with conflict
 		// meta.RemoveStatusCondition(&contaboCluster.Status.Conditions, infrastructurev1beta2.ClusterSshKeyReadyCondition)
 		// if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
 		// 	log.Error(patchErr, "Failed to patch cluster status")
 		// }
-		log.Info("Deleted SSH key", "sshKeyID", contaboCluster.Status.SshKey.SecretId)
+		log.Info("Deleted SSH key", "name", sshKeyName)
 	}
 
 	// Remove our finalizer from the list and update it.

@@ -51,6 +51,9 @@ type ContaboMachineStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
+	// Initialization
+	Initialization *ContaboMachineInitializationStatus `json:"initialization,omitempty"`
+
 	// FailureReason will be set in the event that there is a terminal problem
 	// reconciling the Machine and will contain a succinct value suitable
 	// for machine interpretation.
@@ -88,6 +91,14 @@ type ContaboMachineStatus struct {
 	// controller's output.
 	// +optional
 	FailureMessage *string `json:"failureMessage,omitempty"`
+}
+
+type ContaboMachineInitializationStatus struct {
+	// Provisioned indicates if the initialization is complete
+	Provisioned bool `json:"provisioned"`
+
+	// ErrorMessage provides details in case of initialization failure
+	ErrorMessage *string `json:"errorMessage,omitempty"`
 }
 
 // ContaboInstanceSpec defines the desired state of a Contabo instance

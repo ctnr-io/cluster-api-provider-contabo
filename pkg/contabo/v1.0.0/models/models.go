@@ -1499,7 +1499,7 @@ type InstanceResponse struct {
 	AdditionalIps []AdditionalIp  `json:"additionalIps"`
 
 	// CancelDate The date on which the instance will be cancelled
-	CancelDate openapi_types.Date `json:"cancelDate"`
+	CancelDate *openapi_types.Date `json:"cancelDate,omitempty"`
 
 	// CpuCores CPU core count
 	CpuCores int64 `json:"cpuCores"`
@@ -2009,7 +2009,7 @@ type ListInstancesResponseData struct {
 	AdditionalIps []AdditionalIp  `json:"additionalIps"`
 
 	// CancelDate The date on which the instance will be cancelled
-	CancelDate openapi_types.Date `json:"cancelDate"`
+	CancelDate *openapi_types.Date `json:"cancelDate,omitempty"`
 
 	// CpuCores CPU core count
 	CpuCores int64 `json:"cpuCores"`

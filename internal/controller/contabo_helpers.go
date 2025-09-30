@@ -17,7 +17,10 @@ limitations under the License.
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -213,4 +216,26 @@ func BuildShortClusterID(clusterUUID string) string {
 // GenerateRequestID generates a UUID v4 for Contabo API request tracking
 func GenerateRequestID() string {
 	return uuid.New().String()
+}
+
+// decodeHTTPResponse decodes the body of an HTTP response into a target struct
+func decodeHTTPResponse[T any](resp *http.Response, err error) (*T, error) {
+	var result *T
+	if err != nil {
+		return result, fmt.Errorf("HTTP request error: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return result, fmt.Errorf("HTTP request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	err = json.NewDecoder(resp.Body).Decode(result)
+	if err != nil {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return result, fmt.Errorf("failed to decode HTTP response: %w: %s", err, string(bodyBytes))
+	}
+
+	return result, nil
 }

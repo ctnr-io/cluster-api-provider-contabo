@@ -180,6 +180,15 @@ spec:
                   - name
                   type: object
                 type: array
+              initialization:
+                description: Initialization
+                properties:
+                  provisioned:
+                    description: Provisioned indicates if the initialization is complete
+                    type: boolean
+                required:
+                - provisioned
+                type: object
               privateNetworks:
                 description: PrivateNetwork contains the discovered information about
                   private networks

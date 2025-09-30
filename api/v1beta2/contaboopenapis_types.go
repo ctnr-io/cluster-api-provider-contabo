@@ -1493,7 +1493,7 @@ type InstanceResponse struct {
 	AdditionalIps []AdditionalIp  `json:"additionalIps"`
 
 	// CancelDate The date on which the instance will be cancelled
-	CancelDate string `json:"cancelDate"`
+	CancelDate *string `json:"cancelDate,omitempty"`
 
 	// CpuCores CPU core count
 	CpuCores int64 `json:"cpuCores"`

@@ -28,7 +28,7 @@ import (
 type ContaboClusterSpec struct {
 	// ControlPlaneEndpoint represents the endpoint used to communicate with the control plane.
 	// +optional
-	ControlPlaneEndpoint clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty"`
+	ControlPlaneEndpoint *clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty"`
 
 	// PrivateNetwork specifies the private network configuration for the cluster.
 	PrivateNetwork ContaboPrivateNetworkSpec `json:"privateNetworks"`
@@ -51,6 +51,9 @@ type ContaboClusterStatus struct {
 	// SshKey contains the references to secrets used by the machine.
 	// +optional
 	SshKey *ContaboSshKeyStatus `json:"secrets,omitempty"`
+
+	// Initialization
+	Initialization *ContaboClusterInitializationStatus `json:"initialization,omitempty"`
 
 	// Conditions defines current service state of the ContaboCluster.
 	// +optional
@@ -88,6 +91,12 @@ type ContaboSshKeyStatus struct {
 
 	// Value is the actual SSH public key value
 	Value string `json:"value"`
+}
+
+// ContaboClusterInitializationStatus defines the observed state of the initialization process
+type ContaboClusterInitializationStatus struct {
+	// Provisioned indicates if the initialization is complete
+	Provisioned bool `json:"provisioned"`
 }
 
 // +kubebuilder:object:root=true

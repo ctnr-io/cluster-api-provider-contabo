@@ -112,41 +112,42 @@ var _ = Describe("Manager", Ordered, func() {
 	AfterEach(func() {
 		specReport := CurrentSpecReport()
 		if specReport.Failed() {
-			By("Fetching controller manager pod logs")
-			cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace)
-			controllerLogs, err := utils.Run(cmd)
-			if err == nil {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Controller logs:\n %s", controllerLogs)
-			} else {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Controller logs: %s", err)
-			}
+			// var cmd *exec.Cmd
+			// By("Fetching controller manager pod logs")
+			// cmd = exec.Command("kubectl", "logs", controllerPodName, "-n", namespace)
+			// controllerLogs, err := utils.Run(cmd)
+			// if err == nil {
+			// 	_, _ = fmt.Fprintf(GinkgoWriter, "Controller logs:\n %s", controllerLogs)
+			// } else {
+			// 	_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Controller logs: %s", err)
+			// }
 
-			By("Fetching Kubernetes events")
-			cmd = exec.Command("kubectl", "get", "events", "-n", namespace, "--sort-by=.lastTimestamp")
-			eventsOutput, err := utils.Run(cmd)
-			if err == nil {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Kubernetes events:\n%s", eventsOutput)
-			} else {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Kubernetes events: %s", err)
-			}
+			// By("Fetching Kubernetes events")
+			// cmd = exec.Command("kubectl", "get", "events", "-n", namespace, "--sort-by=.lastTimestamp")
+			// eventsOutput, err := utils.Run(cmd)
+			// if err == nil {
+			// 	_, _ = fmt.Fprintf(GinkgoWriter, "Kubernetes events:\n%s", eventsOutput)
+			// } else {
+			// 	_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Kubernetes events: %s", err)
+			// }
 
-			By("Fetching curl-metrics logs")
-			cmd = exec.Command("kubectl", "logs", "curl-metrics", "-n", namespace)
-			metricsOutput, err := utils.Run(cmd)
-			if err == nil {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Metrics logs:\n %s", metricsOutput)
-			} else {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get curl-metrics logs: %s", err)
-			}
+			// By("Fetching curl-metrics logs")
+			// cmd = exec.Command("kubectl", "logs", "curl-metrics", "-n", namespace)
+			// metricsOutput, err := utils.Run(cmd)
+			// if err == nil {
+			// 	_, _ = fmt.Fprintf(GinkgoWriter, "Metrics logs:\n %s", metricsOutput)
+			// } else {
+			// 	_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get curl-metrics logs: %s", err)
+			// }
 
-			By("Fetching controller manager pod description")
-			cmd = exec.Command("kubectl", "describe", "pod", controllerPodName, "-n", namespace)
-			podDescription, err := utils.Run(cmd)
-			if err == nil {
-				fmt.Println("Pod description:\n", podDescription)
-			} else {
-				fmt.Println("Failed to describe controller pod")
-			}
+			// By("Fetching controller manager pod description")
+			// cmd = exec.Command("kubectl", "describe", "pod", controllerPodName, "-n", namespace)
+			// podDescription, err := utils.Run(cmd)
+			// if err == nil {
+			// 	fmt.Println("Pod description:\n", podDescription)
+			// } else {
+			// 	fmt.Println("Failed to describe controller pod")
+			// }
 		}
 	})
 
@@ -319,13 +320,10 @@ var _ = Describe("Manager", Ordered, func() {
 		}
 
 		BeforeEach(func() {
-			By("creating test namespace")
-			kubectl("create", "namespace", testNamespace)
-		})
-
-		AfterEach(func() {
 			By("cleaning up test resources")
 			kubectl("delete", "namespace", testNamespace, "--ignore-not-found=true", "--timeout=60s")
+			By("creating test namespace")
+			kubectl("create", "namespace", testNamespace)
 		})
 
 		It("creates ContaboCluster and control plane with V76 product", func() {
@@ -345,7 +343,7 @@ var _ = Describe("Manager", Ordered, func() {
 
 			By("verifying V76 product type is configured for control plane machine")
 			Eventually(func() string {
-				output, _ := kubectl("get", "contabomachine", "test-control-plane", "-n", testNamespace, "-o", "jsonpath={.spec.instanceType}")
+				output, _ := kubectl("get", "contabomachine", "test-control-plane", "-n", testNamespace, "-o", "jsonpath={.spec.instance.productId}")
 				return output
 			}, 30*time.Second, 2*time.Second).Should(Equal("V76"))
 

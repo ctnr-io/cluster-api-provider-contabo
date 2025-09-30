@@ -154,6 +154,9 @@ const (
 	// InstanceWaitingForPrivateNetworksReason indicates waiting for machine private networks to be ready.
 	InstanceWaitingForPrivateNetworksReason = "InstanceWaitingForPrivateNetworks"
 
+	// InstanceWaitingForSshKeyReason indicates waiting for cluster sshkey to be ready.
+	InstanceWaitingForSshKeyReason = "InstanceWaitingForSshKey"
+
 	// InstanceCreatingReason indicates the instance is being created.
 	InstanceCreatingReason = "InstanceCreating"
 
@@ -240,6 +243,12 @@ const (
 const (
 	// WaitingForClusterInfrastructureReason indicates waiting for cluster infrastructure to be ready.
 	WaitingForClusterInfrastructureReason = "WaitingForClusterInfrastructure"
+
+	// BootstrapDataAvailableCondition indicates bootstrap data is available.
+	BootstrapDataAvailableCondition = "BootstrapDataAvailable"
+
+	// BootstrapDataAvailableReason indicates bootstrap data is available.
+	BootstrapDataAvailableReason = "BootstrapDataAvailable"
 
 	// WaitingForBootstrapDataReason indicates waiting for bootstrap data to be ready.
 	WaitingForBootstrapDataReason = "WaitingForBootstrapData"

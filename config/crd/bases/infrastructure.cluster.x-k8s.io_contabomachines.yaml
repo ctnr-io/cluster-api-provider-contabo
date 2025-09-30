@@ -206,6 +206,19 @@ spec:
                   can be added as events to the Machine object and/or logged in the
                   controller's output.
                 type: string
+              initialization:
+                description: Initialization
+                properties:
+                  errorMessage:
+                    description: ErrorMessage provides details in case of initialization
+                      failure
+                    type: string
+                  provisioned:
+                    description: Provisioned indicates if the initialization is complete
+                    type: boolean
+                required:
+                - provisioned
+                type: object
               instance:
                 description: Instance is the current state of the Contabo instance.
                 properties:
@@ -397,7 +410,6 @@ spec:
                 required:
                 - addOns
                 - additionalIps
-                - cancelDate
                 - cpuCores
                 - createdDate
                 - customerId

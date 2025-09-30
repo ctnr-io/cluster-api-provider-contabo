@@ -94,6 +94,10 @@ test-e2e: setup-test-e2e manifests generate fmt vet clusterctl ## Run the e2e te
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) CLUSTERCTL=$(CLUSTERCTL) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
 	$(MAKE) cleanup-test-e2e
 
+.PHONY: test-e2e.re
+test-e2e.re: cleanup-test-e2e
+	$(MAKE) test-e2e
+
 .PHONY: dev-deploy
 dev-deploy: docker-build-kind ## Build image, load to kind, and deploy for development.
 	$(MAKE) deploy IMG=${IMG}
