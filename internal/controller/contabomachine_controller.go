@@ -140,17 +140,12 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	// Initialize machine setup
-	if result := r.initializeMachine(ctx, machine, contaboMachine, contaboCluster); !result.IsZero() {
+	if result := r.initializeMachine(ctx, machine, contaboMachine, contaboCluster); result.RequeueAfter > 0 {
 		return result, nil
 	}
 
 	// Check if instance was already reconciled
-	if contaboMachine.Status.Instance == nil {
-		return r.reconcileNewInstance(ctx, machine, contaboMachine, contaboCluster)
-	}
-
-	// TODO: Handle updates to existing instances (e.g., changing instance type)
-	return ctrl.Result{}, nil
+	return r.reconcileInstance(ctx, machine, contaboMachine, contaboCluster)
 }
 
 // initializeMachine handles initial machine setup and validation
@@ -260,15 +255,15 @@ func (r *ContaboMachineReconciler) getBootstrapData(ctx context.Context, machine
 
 	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
 		Type:   infrastructurev1beta2.BootstrapDataAvailableCondition,
-		Status: metav1.ConditionFalse,
+		Status: metav1.ConditionTrue,
 		Reason: infrastructurev1beta2.BootstrapDataAvailableReason,
 	})
 
 	return string(bootstrapDataSecret.Data["value"]), ctrl.Result{}, nil
 }
 
-// reconcileNewInstance handles creation and setup of a new instance
-func (r *ContaboMachineReconciler) reconcileNewInstance(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
+// reconcileInstance handles creation and setup of a new instance
+func (r *ContaboMachineReconciler) reconcileInstance(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
 
 	// Find or create instance
@@ -278,12 +273,12 @@ func (r *ContaboMachineReconciler) reconcileNewInstance(ctx context.Context, mac
 	}
 
 	// Validate instance status
-	if result, err := r.validateInstanceStatus(ctx, contaboMachine); err != nil || !result.IsZero() {
+	if result, err := r.validateInstanceStatus(ctx, contaboMachine); err != nil || result.RequeueAfter > 0 {
 		return result, err
 	}
 
 	// Handle private network assignment
-	if result, err := r.reconcilePrivateNetworkAssignment(ctx, contaboMachine, contaboCluster); err != nil || !result.IsZero() {
+	if result, err := r.reconcilePrivateNetworkAssignment(ctx, contaboMachine, contaboCluster); err != nil || result.RequeueAfter > 0 {
 		return result, err
 	}
 
@@ -293,7 +288,7 @@ func (r *ContaboMachineReconciler) reconcileNewInstance(ctx context.Context, mac
 	}
 
 	// Reinstall instance with cloud-init
-	if result, err := r.reinstallInstance(ctx, machine, contaboMachine, contaboCluster, sshKeys); err != nil || !result.IsZero() {
+	if result, err := r.bootstrapInstance(ctx, machine, contaboMachine, contaboCluster, sshKeys); err != nil || result.RequeueAfter > 0 {
 		return result, err
 	}
 
@@ -709,54 +704,69 @@ func (r *ContaboMachineReconciler) updateMachineAddresses(ctx context.Context, c
 	return nil
 }
 
-// reinstallInstance reinstalls instance with cloud-init bootstrap data
-func (r *ContaboMachineReconciler) reinstallInstance(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster, sshKeys []int64) (ctrl.Result, error) {
+// bootstrapInstance reinstalls instance with cloud-init bootstrap data
+func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster, sshKeys []int64) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	// Get and validate bootstrap data
 	bootstrapData, result, err := r.getBootstrapData(ctx, machine, contaboMachine, contaboCluster)
-	if err != nil || !result.IsZero() {
+	if err != nil || result.RequeueAfter > 0 {
 		return result, err
 	}
 
-	// Reinstall instance with cloud-init bootstrap data
-	resp, err := r.ContaboClient.ReinstallInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
-		SshKeys:      &sshKeys,
-		DefaultUser:  (*models.ReinstallInstanceRequestDefaultUser)(contaboMachine.Status.Instance.DefaultUser),
-		ImageId:      contaboMachine.Status.Instance.ImageId,
-		RootPassword: nil,
-		UserData:     &bootstrapData,
-	})
-	if err != nil || resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.handleError(
-			ctx,
-			contaboMachine,
-			err,
-			infrastructurev1beta2.InstanceReinstallingReason,
-			"Failed to reinstall instance",
-		)
-	}
+	if meta.IsStatusConditionFalse(contaboMachine.Status.Conditions, infrastructurev1beta2.InstanceBootstrapCondition) {
 
-	// Wait for instance to be running after reinstall
-	for {
-		time.Sleep(10 * time.Second)
-		instanceGetResp, err := r.ContaboClient.RetrieveInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, &models.RetrieveInstanceParams{})
-		if err != nil || instanceGetResp.StatusCode() < 200 || instanceGetResp.StatusCode() >= 300 {
+		meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+			Type:   infrastructurev1beta2.InstanceBootstrapCondition,
+			Status: metav1.ConditionFalse,
+			Reason: infrastructurev1beta2.InstanceReinstallingReason,
+		})
+
+		// Reinstall instance with cloud-init bootstrap data
+		resp, err := r.ContaboClient.ReinstallInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
+			SshKeys:      &sshKeys,
+			DefaultUser:  (*models.ReinstallInstanceRequestDefaultUser)(contaboMachine.Status.Instance.DefaultUser),
+			ImageId:      contaboMachine.Status.Instance.ImageId,
+			RootPassword: nil,
+			UserData:     &bootstrapData,
+		})
+		if err != nil || resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.handleError(
 				ctx,
 				contaboMachine,
 				err,
 				infrastructurev1beta2.InstanceReinstallingReason,
-				"Failed to retrieve instance after reinstall",
+				"Failed to reinstall instance",
 			)
 		}
-		if instanceGetResp.JSON200.Data[0].Status == models.InstanceStatusRunning {
-			contaboMachine.Status.Instance = convertInstanceResponseData(&instanceGetResp.JSON200.Data[0])
-			break
+
+		// Wait for instance to be running after reinstall
+		for {
+			time.Sleep(10 * time.Second)
+			instanceGetResp, err := r.ContaboClient.RetrieveInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, &models.RetrieveInstanceParams{})
+			if err != nil || instanceGetResp.StatusCode() < 200 || instanceGetResp.StatusCode() >= 300 {
+				return ctrl.Result{RequeueAfter: 30 * time.Second}, r.handleError(
+					ctx,
+					contaboMachine,
+					err,
+					infrastructurev1beta2.InstanceReinstallingReason,
+					"Failed to retrieve instance after reinstall",
+				)
+			}
+			if instanceGetResp.JSON200.Data[0].Status == models.InstanceStatusRunning {
+				contaboMachine.Status.Instance = convertInstanceResponseData(&instanceGetResp.JSON200.Data[0])
+				break
+			}
+			log.Info("Waiting for instance to be running after reinstall",
+				"instanceID", contaboMachine.Status.Instance.InstanceId,
+				"currentStatus", contaboMachine.Status.Instance.Status)
 		}
-		log.Info("Waiting for instance to be running after reinstall",
-			"instanceID", contaboMachine.Status.Instance.InstanceId,
-			"currentStatus", contaboMachine.Status.Instance.Status)
+
+		meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+			Type:   infrastructurev1beta2.InstanceBootstrapCondition,
+			Status: metav1.ConditionTrue,
+			Reason: infrastructurev1beta2.InstanceReadyCondition,
+		})
 	}
 
 	return ctrl.Result{}, nil

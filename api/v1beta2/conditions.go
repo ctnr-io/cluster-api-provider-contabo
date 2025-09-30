@@ -138,6 +138,9 @@ const (
 
 	// ClusterInfrastructureReadyCondition indicates the cluster infrastructure dependency is ready.
 	ClusterInfrastructureReadyCondition = "ClusterInfrastructureReady"
+
+	// InstanceBootstrapCondition indicates the instance bootstrap process is complete.
+	InstanceBootstrapCondition = "InstanceBootstrap"
 )
 
 // Instance condition reasons.
