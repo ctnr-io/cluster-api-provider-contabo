@@ -10,8 +10,10 @@ rules:
   - secrets
   verbs:
   - create
+  - delete
   - get
   - list
+  - update
   - watch
 - apiGroups:
   - cluster.x-k8s.io

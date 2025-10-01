@@ -1,0 +1,5 @@
+{
+  "tasks": {
+    "generate": "deno run -A jsr:@tmpl/gen ."
+  }
+}

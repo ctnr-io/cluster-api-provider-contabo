@@ -256,6 +256,9 @@ const (
 	// WaitingForBootstrapDataReason indicates waiting for bootstrap data to be ready.
 	WaitingForBootstrapDataReason = "WaitingForBootstrapData"
 
+	// BootstrapDataMergeFailedReason indicates merging bootstrap data failed.
+	BootstrapDataMergeFailedReason = "BootstrapDataMergeFailed"
+
 	// ClusterInfrastructureReadyReason indicates the cluster infrastructure is ready.
 	ClusterInfrastructureReadyReason = "ClusterInfrastructureReady"
 

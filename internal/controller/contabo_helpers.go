@@ -24,9 +24,11 @@ import (
 	"strconv"
 	"strings"
 
+	"dario.cat/mergo"
 	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
 	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/v1.0.0/models"
 	"github.com/google/uuid"
+	"go.yaml.in/yaml/v2"
 )
 
 const (
@@ -47,12 +49,6 @@ const (
 
 	// ClusterUUIDLabel is the label key used to store the unique cluster UUID
 	ClusterUUIDLabel = "cluster.x-k8s.io/capc-uuid"
-
-	// Display name state strings (used in parsing) - kept short to save space
-	stateAvailable    = "avl"
-	stateProvisioning = "prv"
-	stateBound        = "bnd"
-	stateError        = "err"
 
 	// DefaultUbuntuImageID is the standardized Ubuntu image used for all cluster nodes
 	// Using a fixed image ensures consistency, security, and compatibility across the cluster
@@ -78,27 +74,6 @@ func ParseProviderID(providerID string) (int64, error) {
 	}
 
 	return instanceID, nil
-}
-
-// GetInstanceState extracts the state from an instance display name
-// Format: "<instance-id>-<state>-<cluster-id>"
-// Returns: "capc-available", "capc-provisioning", "capc-cluster-bound", or "capc-error"
-func GetInstanceState(displayName string) string {
-	parts := strings.Split(displayName, "-")
-	if len(parts) >= 2 {
-		// Try parts[1] first (format: instanceID-state-cluster)
-		switch parts[1] {
-		case stateAvailable:
-			return StateAvailable
-		case stateProvisioning:
-			return StateProvisioning
-		case stateBound:
-			return StateClusterBound
-		case stateError:
-			return StateError
-		}
-	}
-	return StateAvailable // default
 }
 
 // ConvertRegionToCreateInstanceRegion converts a string region to the OpenAPI enum type
@@ -137,42 +112,6 @@ func ConvertRegionToCreateInstanceRegion(region string) *models.CreateInstanceRe
 		// Default to EU if unknown region
 		r := models.EU
 		return &r
-	}
-}
-
-// BuildInstanceDisplayName creates a descriptive display name for a Contabo instance
-// Format: "<cluster-name>-<short-cluster-id>-<machine-name>" (shortened for space)
-func BuildInstanceDisplayName(cluster *infrastructurev1beta2.ContaboCluster, machineName string) string {
-	clusterUUID := GetClusterUUID(cluster)
-	shortID := BuildShortClusterID(clusterUUID)
-	return fmt.Sprintf("%s-%s-%s", cluster.Name, shortID, machineName)
-}
-
-// BuildInstanceDisplayNameWithState creates a display name including instance state
-// Format: "<instance-id>-<state>-<cluster-id>" (shortened for space)
-func BuildInstanceDisplayNameWithState(instanceID int64, state, clusterID string) string {
-	stateShort := mapStateToShort(state)
-	if stateShort != "" && clusterID != "" {
-		return fmt.Sprintf("%d-%s-%s", instanceID, stateShort, clusterID)
-	} else if stateShort != "" {
-		return fmt.Sprintf("%d-%s", instanceID, stateShort)
-	}
-	return fmt.Sprintf("%d", instanceID)
-}
-
-// mapStateToShort converts full state names to short versions for display names
-func mapStateToShort(state string) string {
-	switch state {
-	case StateAvailable:
-		return stateAvailable
-	case StateProvisioning:
-		return stateProvisioning
-	case StateClusterBound:
-		return stateBound
-	case StateError:
-		return stateError
-	default:
-		return stateAvailable
 	}
 }
 
@@ -219,7 +158,7 @@ func GenerateRequestID() string {
 }
 
 // decodeHTTPResponse decodes the body of an HTTP response into a target struct
-func decodeHTTPResponse[T any](resp *http.Response, err error) (*T, error) {
+func DecodeHTTPResponse[T any](resp *http.Response, err error) (*T, error) {
 	var result *T
 	if err != nil {
 		return result, fmt.Errorf("HTTP request error: %w", err)
@@ -238,4 +177,23 @@ func decodeHTTPResponse[T any](resp *http.Response, err error) (*T, error) {
 	}
 
 	return result, nil
+}
+
+func mergeCloudConfig(file1, file2 []byte) ([]byte, error) {
+	// Unmarshal both files into maps
+	var config1, config2 map[string]interface{}
+	if err := yaml.Unmarshal(file1, &config1); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal file1: %v", err)
+	}
+	if err := yaml.Unmarshal(file2, &config2); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal file2: %v", err)
+	}
+
+	// Merge config2 into config1 (config1 takes precedence)
+	if err := mergo.Merge(&config1, config2, mergo.WithAppendSlice); err != nil {
+		return nil, fmt.Errorf("failed to merge configs: %v", err)
+	}
+
+	// Marshal the merged config back to YAML
+	return yaml.Marshal(config1)
 }

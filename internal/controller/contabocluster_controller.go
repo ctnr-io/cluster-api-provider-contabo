@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -317,10 +318,6 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 				)
 			}
 
-			// Register private key as Kubernetes secret
-			labels := map[string]string{}
-			labels["cluster.x-k8s.io/managed-by"] = "contabo-operator"
-
 			// Delete secret if already exists
 			err = r.Get(ctx, client.ObjectKey{
 				Name:      sshKeySecretName,
@@ -330,7 +327,7 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 				// Secret already exists, delete it first
 				err = r.Delete(ctx, &corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      sshKeyName,
+						Name:      sshKeySecretName,
 						Namespace: contaboCluster.Namespace,
 					},
 				})
@@ -347,15 +344,21 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 			}
 
 			// Create new secret
+			secretData := map[string][]byte{
+				"id_rsa":     []byte(privateKey),
+				"id_rsa.pub": []byte(publicKey),
+			}
+
+			// Verify data integrity before storing in secret
+			log.Info("Storing SSH keys in Kubernetes secret",
+				"secretName", sshKeySecretName)
+
 			if err := r.Create(ctx, &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      sshKeySecretName,
 					Namespace: contaboCluster.Namespace,
 				},
-				Data: map[string][]byte{
-					"id_rsa":     []byte(privateKey),
-					"id_rsa.pub": []byte(publicKey),
-				},
+				Data: secretData,
 			}); err != nil {
 				return r.handleError(
 					ctx,
@@ -368,9 +371,16 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 			}
 
 			// Create SSH key if not found
+			// Trim the public key for Contabo API (remove trailing newline)
+			trimmedPublicKey := strings.TrimSpace(publicKey)
+
+			// Log public key formatting for Contabo API
+			log.Info("Submitting SSH public key to Contabo API",
+				"sshKeyName", sshKeyName)
+
 			sshKeyCreateResp, err := r.ContaboClient.CreateSecretWithResponse(ctx, &models.CreateSecretParams{}, models.CreateSecretRequest{
 				Name:  sshKeyName,
-				Value: publicKey,
+				Value: trimmedPublicKey,
 				Type:  "ssh",
 			})
 			if err != nil || sshKeyCreateResp.StatusCode() < 200 || sshKeyCreateResp.StatusCode() >= 300 {
@@ -599,34 +609,32 @@ func (r *ContaboClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func generateSSHKeyPair() (privateKey string, publicKey string, err error) {
-	// Generate a new RSA private key
-	privateKeyRsa, err := rsa.GenerateKey(rand.Reader, 2048)
+// generateSSHKeyPair generates a new RSA SSH key pair and returns the public and private keys as strings
+func generateSSHKeyPair() (string, string, error) {
+	// generate private key
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to generate private key: %w", err)
+		return "", "", err
 	}
 
-	// Get public key RSA
-	publicKeyRsa := privateKeyRsa.PublicKey
+	// write private key as PEM
+	var privKeyBuf strings.Builder
 
-	// Generate the public key from the private key
-	publicKeySsh, err := ssh.NewPublicKey(&publicKeyRsa)
+	privateKeyPEM := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)}
+	if err := pem.Encode(&privKeyBuf, privateKeyPEM); err != nil {
+		return "", "", err
+	}
+
+	// generate and write public key
+	pub, err := ssh.NewPublicKey(&privateKey.PublicKey)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to generate public key: %w", err)
+		return "", "", err
 	}
 
-	// Marshal the private key to PEM format
-	privateKeyRsaPEM := &pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(privateKeyRsa),
-	}
-	privateKey = string(pem.EncodeToMemory(privateKeyRsaPEM))
+	var pubKeyBuf strings.Builder
+	pubKeyBuf.Write(ssh.MarshalAuthorizedKey(pub))
 
-	// Marshal the public key to OpenSSH format
-	publicKey = string(ssh.MarshalAuthorizedKey(publicKeySsh))
-
-	fmt.Println("SSH key pair generated: id_rsa (private), id_rsa.pub (public)")
-	return privateKey, publicKey, nil
+	return privKeyBuf.String(), pubKeyBuf.String(), nil
 }
 
 // handleError centralizes error handling with status condition, logging, event recording, and patching

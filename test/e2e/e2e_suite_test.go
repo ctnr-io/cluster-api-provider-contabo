@@ -23,8 +23,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 	"testing"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -56,41 +56,46 @@ func TestE2E(t *testing.T) {
 	RunSpecs(t, "e2e suite")
 }
 
+func ParallelRun(cmds []*exec.Cmd) {
+	var wg sync.WaitGroup
+	for _, cmd := range cmds {
+		wg.Add(1)
+		go func(c *exec.Cmd) {
+			defer wg.Done()
+			_, err := utils.Run(c)
+			if err != nil {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Error running command %v: %v\n", c, err)
+			}
+		}(cmd)
+	}
+	wg.Wait()
+}
+
 var _ = BeforeSuite(func() {
 	// Clean up any remaining Cluster API resources before uninstalling operators
 	_, _ = fmt.Fprintf(GinkgoWriter, "Cleaning up remaining Cluster API resources...\n")
 
-	// Delete all Cluster resources across all namespaces
-	cmd := exec.Command("kubectl", "delete", "clusters", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=120s")
-	_, _ = utils.Run(cmd)
-
-	// Delete all ContaboCluster resources across all namespaces
-	cmd = exec.Command("kubectl", "delete", "contaboclusters", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=120s")
-	_, _ = utils.Run(cmd)
-
-	// Delete any Machine and MachineSet resources that might exist
-	cmd = exec.Command("kubectl", "delete", "machines", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=60s")
-	_, _ = utils.Run(cmd)
-
-	cmd = exec.Command("kubectl", "delete", "machinesets", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=60s")
-	_, _ = utils.Run(cmd)
-
-	// Wait a bit for finalizers to be processed
-	time.Sleep(10 * time.Second)
+	// Delete all cluster resources across all namespaces
+	// ParallelRun([]*exec.Cmd{
+	// 	// exec.Command("kubectl", "delete", "contaboclusters", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
+	// 	// exec.Command("kubectl", "delete", "contabomachines", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
+	// 	// exec.Command("kubectl", "delete", "machines", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
+	// 	// exec.Command("kubectl", "delete", "machinesets", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
+	// 	// exec.Command("kubectl", "delete", "clusters", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
+	// 	// exec.Command("kubectl", "delete", "ns", "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+	// })
 
 	// Force delete any remaining resources if they're stuck
-	cmd = exec.Command("kubectl", "patch", "clusters", "--all", "--all-namespaces", "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
-	_, _ = utils.Run(cmd)
+	ParallelRun([]*exec.Cmd{
+		exec.Command("kubectl", "patch", "contaboclusters", "--all", "--all-namespaces", "--type=json", "-p", `{"metadata":{"finalizers":[]}}`, "--ignore-not-found=true"),
+		exec.Command("kubectl", "patch", "contabomachines", "--all", "--all-namespaces", "--type=json", "-p", `{"metadata":{"finalizers":[]}}`, "--ignore-not-found=true"),
+		exec.Command("kubectl", "patch", "machines", "--all", "--all-namespaces", "--type=json", "-p", `{"metadata":{"finalizers":[]}}`, "--ignore-not-found=true"),
+		exec.Command("kubectl", "patch", "machinesets", "--all", "--all-namespaces", "--type=json", "-p", `{"metadata":{"finalizers":[]}}`, "--ignore-not-found=true"),
+		exec.Command("kubectl", "patch", "clusters", "--all", "--all-namespaces", "--type=json", "-p", `{"metadata":{"finalizers":[]}}`, "--ignore-not-found=true"),
+		exec.Command("kubectl", "patch", "namespaces", "contabo-e2e-test", "--type=json", "-p", `{"metadata":{"finalizers":[]}}`, "--ignore-not-found=true"),
+	})
 
-	cmd = exec.Command("kubectl", "patch", "contaboclusters", "--all", "--all-namespaces", "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
-	_, _ = utils.Run(cmd)
-
-	cmd = exec.Command("kubectl", "patch", "machines", "--all", "--all-namespaces", "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
-	_, _ = utils.Run(cmd)
-
-	cmd = exec.Command("kubectl", "patch", "machinesets", "--all", "--all-namespaces", "--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
-	_, _ = utils.Run(cmd)
-
+	var cmd *exec.Cmd
 
 	// Remove clusterctl artifacts if any
 	cmd = exec.Command("clusterctl", "delete", "--all", "--include-crd", "--include-namespace", "--ignore-not-found=true")
@@ -123,13 +128,12 @@ var _ = BeforeSuite(func() {
 	By("removing manager namespace")
 	cmd = exec.Command("kubectl", "delete", "ns", namespace)
 	_, _ = utils.Run(cmd)
-	
+
 	// // Teardown CertManager after the suite if not skipped and if it was not already installed
 	// if !skipCertManagerInstall && !isCertManagerAlreadyInstalled {
 	// 	_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CertManager...\n")
 	// 	utils.UninstallCertManager()
 	// }
-
 
 	By("building the manager(Operator) image and loading into Kind")
 	cmd = exec.Command("make", "docker-build-kind", fmt.Sprintf("IMG=%s", projectImage))
