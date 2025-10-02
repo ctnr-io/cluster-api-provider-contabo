@@ -1,47 +1,47 @@
 import { yaml } from "jsr:@tmpl/core";
 import * as YAML from "jsr:@std/yaml";
 
-import * as network from "./network.ts";
-import * as containerd from "./containerd.ts";
-import * as kubeadm from "./kubeadm.ts";
-import * as helm from "./helm.ts";
-import * as etcdBackup from "./etcd-backup.ts";
-import { Packages, RunCmd } from "./types.ts";
+import * as network from "./cloud-config/network.ts";
+import * as containerd from "./cloud-config/containerd.ts";
+import * as gvisor from './cloud-config/gvisor.ts'
+import * as kubeadm from "./cloud-config/kubeadm.ts";
+import * as etcdBackup from "./cloud-config/etcd-backup.ts";
+import { Packages, RunCmd } from "./cloud-config/types.ts";
 
 export const packageUpdate: boolean = [
   network.packageUpdate,
-  kubeadm.packageUpdate,
   containerd.packageUpdate,
-  helm.packageUpdate,
+  gvisor.packageUpdate,
+  kubeadm.packageUpdate,
   etcdBackup.packageUpdate,
 ]
   .some((
     x,
   ) => x);
 
-export const writeFiles = [
-  ...network.writeFiles,
-  ...kubeadm.writeFiles,
-  ...containerd.writeFiles,
-  ...helm.writeFiles,
-  ...etcdBackup.writeFiles,
-].map((item) => ({ ...item, content: item.content.noindent().trim() }));
-
 export const packages: Packages = [
   ...new Set([
     network.packages,
-    kubeadm.packages,
     containerd.packages,
-    helm.packages,
+    gvisor.packages,
+    kubeadm.packages,
     etcdBackup.packages,
   ].flat()),
 ];
 
+export const writeFiles = [
+  ...network.writeFiles,
+  ...kubeadm.writeFiles,
+  ...gvisor.writeFiles,
+  ...containerd.writeFiles,
+  ...etcdBackup.writeFiles,
+].map((item) => ({ ...item, content: item.content.noindent().trim() }));
+
 export const runcmd: RunCmd = [
   network.runcmd,
   containerd.runcmd,
+  gvisor.runcmd,
   kubeadm.runcmd,
-  helm.runcmd,
   etcdBackup.runcmd,
 ].flat();
 
@@ -57,4 +57,4 @@ packages:
 
 runcmd:
   ${runcmd.map((line) => `- |${line}`).join("\n  ").trimStart()}
-`;
+`.trim();

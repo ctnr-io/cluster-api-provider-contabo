@@ -8,7 +8,6 @@ export const packageUpdate: PackageUpdate = false;
 
 export const packages: Packages = [
   "etcd-client",
-  "kubectl",
   "cron",
 ];
 

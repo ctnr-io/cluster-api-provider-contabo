@@ -76,23 +76,12 @@ var _ = BeforeSuite(func() {
 	_, _ = fmt.Fprintf(GinkgoWriter, "Cleaning up remaining Cluster API resources...\n")
 
 	// Delete all cluster resources across all namespaces
-	// ParallelRun([]*exec.Cmd{
-	// 	// exec.Command("kubectl", "delete", "contaboclusters", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
-	// 	// exec.Command("kubectl", "delete", "contabomachines", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
-	// 	// exec.Command("kubectl", "delete", "machines", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
-	// 	// exec.Command("kubectl", "delete", "machinesets", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
-	// 	// exec.Command("kubectl", "delete", "clusters", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
-	// 	// exec.Command("kubectl", "delete", "ns", "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-	// })
-
-	// Force delete any remaining resources if they're stuck
 	ParallelRun([]*exec.Cmd{
-		exec.Command("kubectl", "patch", "contaboclusters", "--all", "--all-namespaces", "--type=json", "-p", `{"metadata":{"finalizers":[]}}`, "--ignore-not-found=true"),
-		exec.Command("kubectl", "patch", "contabomachines", "--all", "--all-namespaces", "--type=json", "-p", `{"metadata":{"finalizers":[]}}`, "--ignore-not-found=true"),
-		exec.Command("kubectl", "patch", "machines", "--all", "--all-namespaces", "--type=json", "-p", `{"metadata":{"finalizers":[]}}`, "--ignore-not-found=true"),
-		exec.Command("kubectl", "patch", "machinesets", "--all", "--all-namespaces", "--type=json", "-p", `{"metadata":{"finalizers":[]}}`, "--ignore-not-found=true"),
-		exec.Command("kubectl", "patch", "clusters", "--all", "--all-namespaces", "--type=json", "-p", `{"metadata":{"finalizers":[]}}`, "--ignore-not-found=true"),
-		exec.Command("kubectl", "patch", "namespaces", "contabo-e2e-test", "--type=json", "-p", `{"metadata":{"finalizers":[]}}`, "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "contaboclusters", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
+		exec.Command("kubectl", "delete", "contabomachines", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
+		exec.Command("kubectl", "delete", "machines", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
+		exec.Command("kubectl", "delete", "machinesets", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
+		exec.Command("kubectl", "delete", "clusters", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
 	})
 
 	var cmd *exec.Cmd
@@ -165,7 +154,7 @@ var _ = BeforeSuite(func() {
 	// _, _ = utils.Run(cmd) // Ignore errors if nothing exists
 
 	// Initialize with latest version that supports v1beta2
-	cmd = exec.Command(clusterctlPath, "init", "--core", "cluster-api", "--bootstrap", "kubeadm")
+	cmd = exec.Command(clusterctlPath, "init", "--core", "cluster-api", "--bootstrap", "kubeadm", "--addon", "helm")
 	_, err = utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred(), "Failed to install CAPI core components")
 })

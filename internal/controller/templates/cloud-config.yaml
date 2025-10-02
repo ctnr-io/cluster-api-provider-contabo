@@ -1,4 +1,3 @@
-
 #cloud-config
 package_update: true
 
@@ -9,9 +8,12 @@ write_files:
     content: |
       #!/bin/sh
   
-      ip route | grep -v eth0 | grep -v default | grep -v ${PRIVATE_NETWORK_CIDR}
-      xargs -I {} sh -c 'sudo ip route del {}'
-  - path: /usr/local/bin/contabo-network-cleanup.service
+      ip route | grep -v default | grep -v ${PRIVATE_NETWORK_CIDR} | awk '{print
+      $1}' | xargs -r -n1 sudo ip route del
+  
+      # ip route | grep -v eth0 | grep -v default | grep -v
+      ${PRIVATE_NETWORK_CIDR} xargs -I {} sh -c 'sudo ip route del {}'
+  - path: /etc/systemd/system/contabo-network-cleanup.service
     owner: 'root:root'
     permissions: '0644'
     content: |
@@ -125,14 +127,13 @@ write_files:
       echo "Etcd restore completed successfully"
 
 packages:
-  - etcd-client
-  - apt-transport-https
-  - curl
-  - gpg
   - sudo
   - ca-certificates
+  - curl
   - gnupg
-  - kubectl
+  - etcd-client
+  - apt-transport-https
+  - gpg
   - cron
 
 runcmd:
@@ -173,13 +174,6 @@ runcmd:
     sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
   
   - |
-    # Add runsc to containerd
-    cat <<EOF | sudo tee -a /etc/containerd/config.toml
-    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
-      runtime_type = "io.containerd.runsc.v1"
-    EOF
-  
-  - |
     # Enable containerd service
     sudo systemctl enable containerd
   
@@ -190,6 +184,23 @@ runcmd:
   - |
     # Update sysctl settings
     sudo sysctl --system
+  
+  - |
+    # Add gvisor's official GPG key and 
+    curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
+    sudo apt-get update && sudo apt-get install -y runsc
+  
+  - |
+    cat <<EOF | sudo tee /etc/containerd/config.toml
+    version = 2
+    [plugins."io.containerd.runtime.v1.linux"]
+      shim_debug = true
+    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+      runtime_type = "io.containerd.runc.v2"
+    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+      runtime_type = "io.containerd.runsc.v1"
+    EOF
   
   - |
     export DEBIAN_FRONTEND=noninteractive
@@ -224,11 +235,3 @@ runcmd:
   - |
     # 5. (Optional) Enable the kubelet service before running kubeadm:
     sudo systemctl enable --now kubelet
-  
-  - |
-    export DEBIAN_FRONTEND=noninteractive
-    curl https://baltocdn.com/helm/signing.asc | gpg --dearmor --batch --no-tty | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
-    sudo apt-get update
-    sudo apt-get install helm
-  

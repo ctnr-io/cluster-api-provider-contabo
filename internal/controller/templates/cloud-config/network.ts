@@ -1,11 +1,10 @@
 import { sh, toml } from "jsr:@tmpl/core";
 import { Packages, PackageUpdate, WriteFiles } from "./types.ts";
+import { privateNetworkCidr } from "./variables.ts";
 
 export const packageUpdate: PackageUpdate = false;
 
 export const packages: Packages = [];
-
-const privateNetworkCidr = "${PRIVATE_NETWORK_CIDR}";
 
 export const writeFiles: WriteFiles = [
   {
@@ -14,11 +13,12 @@ export const writeFiles: WriteFiles = [
     permissions: "0755",
     content: sh`
       #!/bin/sh
-      ip route | grep -v eth0 | grep -v default | grep -v ${privateNetworkCidr} xargs -I {} sh -c 'sudo ip route del {}'
+      ip route | grep -v default | grep -v ${privateNetworkCidr} | awk '{print $1}' | xargs -r -n1 sudo ip route del
+      # ip route | grep -v eth0 | grep -v default | grep -v ${privateNetworkCidr} xargs -I {} sh -c 'sudo ip route del {}'
     `,
   },
   {
-    path: "/usr/local/bin/contabo-network-cleanup.service",
+    path: "/etc/systemd/system/contabo-network-cleanup.service",
     owner: "root:root",
     permissions: "0644",
     content: toml`

@@ -157,55 +157,56 @@ make undeploy
 
 ### API Types
 
+
 #### ContaboCluster
-Manages cluster-wide infrastructure including private networking, SSH keys, and control plane endpoint.
+Manages cluster-wide infrastructure including private networking and control plane endpoint.
 
 **Key fields:**
-- `region`: Contabo region (e.g., "EU", "US-central", "US-east", "US-west", "SIN")
-- `controlPlaneEndpoint`: Kubernetes API server endpoint configuration
-- `privateNetworks`: List of private networks to create for the cluster
-- `sshKeys`: Cluster-wide SSH key configuration for all machines
-- `secretsRef`: Reference to secret containing sensitive cluster data
+- `spec.controlPlaneEndpoint`: (optional) Kubernetes API server endpoint configuration (host, port)
+- `spec.privateNetworks.region`: Contabo region for the private network (e.g., "EU", "US-central", "US-east", "US-west", "SIN")
 
 **Sample configuration:**
 ```yaml
 spec:
-  region: "EU"
-  controlPlaneEndpoint:
-    host: "10.0.0.100"
-    port: 6443
-  privateNetworks:
-    - name: "cluster-network"
-      cidr: "10.0.0.0/24"
-  sshKeys:
-    - name: "my-key"
-      keyId: 12345
+   controlPlaneEndpoint:
+      host: "10.0.0.100"
+      port: 6443
+   privateNetworks:
+      region: "EU"
 ```
+
 
 #### ContaboMachine
-Manages individual VPS instances with automatic private network assignment and SSH key configuration.
+Manages individual VPS instances.
 
 **Key fields:**
-- `instance.productId`: Contabo product ID (get from API or portal)
-- `instance.imageId`: OS image ID (get from Contabo API)
-- `instance.sshKeys`: Additional SSH keys specific to this machine (optional)
-- `privateNetworks`: List of private networks to attach to this machine
-- `providerID`: Unique provider identifier for the instance
+- `spec.providerID`: (optional) Unique provider identifier for the instance
+- `spec.instance.productId`: Contabo product ID (instance type, e.g., "V45")
 
 **Sample configuration:**
 ```yaml
 spec:
-  instance:
-    productId: "V45"
-    imageId: "afecbb85-e2fc-46f0-9684-b46b1faf00bb"
-    sshKeys:
-      - 12345
-  privateNetworks:
-    - name: "cluster-network"
+   providerID: "contabo://123456789"
+   instance:
+      productId: "V45"
 ```
 
+
 #### ContaboMachineTemplate
-Template for creating machines with consistent configuration.
+Template for creating machines with consistent configuration. Wraps a `spec` field that matches the `ContaboMachineSpec`.
+
+**Key fields:**
+- `spec.template.spec`: The machine spec to use for all created machines
+
+**Sample configuration:**
+```yaml
+spec:
+   template:
+      spec:
+         providerID: "contabo://123456789"
+         instance:
+            productId: "V45"
+```
 
 ### Environment Variables
 

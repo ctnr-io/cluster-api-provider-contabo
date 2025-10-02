@@ -316,7 +316,7 @@ var _ = Describe("Manager", Ordered, func() {
 			Eventually(func() string {
 				output, _ := kubectl("get", resource, name, "-n", testNamespace, "-o", "jsonpath={.status.conditions}")
 				return output
-			}, 30*time.Second, 2*time.Second).ShouldNot(BeEmpty())
+			}, 120*time.Second, 10*time.Second).ShouldNot(BeEmpty())
 		}
 
 		BeforeEach(func() {

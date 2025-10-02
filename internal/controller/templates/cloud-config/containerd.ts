@@ -63,13 +63,6 @@ export const runcmd: RunCmd = [
     sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
   `,
   sh`
-    # Add runsc to containerd
-    cat <<EOF | sudo tee -a /etc/containerd/config.toml
-    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
-      runtime_type = "io.containerd.runsc.v1"
-    EOF
-  `,
-  sh`
     # Enable containerd service
     sudo systemctl enable containerd
   `,

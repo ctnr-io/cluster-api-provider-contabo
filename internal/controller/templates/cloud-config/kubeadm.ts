@@ -1,8 +1,6 @@
 import { sh } from "jsr:@tmpl/core";
 import { Packages, PackageUpdate, WriteFiles } from "./types.ts";
-
-// Kubernetes version to install, e.g. "v1.28"
-const kubeadmVersion = "${KUBEADM_VERSION}" as `v${string}`
+import { kubeadmVersion } from "./variables.ts";
 
 export const packageUpdate: PackageUpdate = true;
 
