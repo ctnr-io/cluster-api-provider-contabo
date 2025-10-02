@@ -101,11 +101,23 @@ type ContaboMachineInitializationStatus struct {
 	ErrorMessage *string `json:"errorMessage,omitempty"`
 }
 
+type ContaboInstanceProvisioningType string
+
+const (
+	// ContaboInstanceProvisioningTypeCreate indicates that a new instance should be reused, defaulting to "ReuseOnly"
+	ContaboInstanceProvisioningTypeReuseOnly ContaboInstanceProvisioningType = "ReuseOnly"
+	// ContaboInstanceProvisioningTypeReuseOrCreate indicates that the provisioning type is not specified
+	ContaboInstanceProvisioningTypeReuseOrCreate ContaboInstanceProvisioningType = "ReuseOrCreate"
+)
+
 // ContaboInstanceSpec defines the desired state of a Contabo instance
 type ContaboInstanceSpec struct {
 	// ProductID is the Contabo product ID (instance type)
 	// +kubebuilder:validation:Required
 	ProductId string `json:"productId"`
+	// Field to know if should create a new instance or reuse an existing one
+	// +optional
+	ProvisioningType *ContaboInstanceProvisioningType `json:"provisioningType,omitempty"`
 }
 
 // ContaboInstanceStatus defines the observed state of a Contabo instance

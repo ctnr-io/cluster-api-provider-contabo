@@ -13,8 +13,11 @@ export const writeFiles: WriteFiles = [
     permissions: "0755",
     content: sh`
       #!/bin/sh
-      ip route | grep -v default | grep -v ${privateNetworkCidr} | awk '{print $1}' | xargs -r -n1 sudo ip route del
-      # ip route | grep -v eth0 | grep -v default | grep -v ${privateNetworkCidr} xargs -I {} sh -c 'sudo ip route del {}'
+      ip route \
+        | grep -v default \
+        | grep -v '${privateNetworkCidr}' \
+        | cut -d' ' -f1 \
+        | xargs -r -n1 sudo ip route del
     `,
   },
   {

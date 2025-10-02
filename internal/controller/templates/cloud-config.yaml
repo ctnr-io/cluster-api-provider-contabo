@@ -7,12 +7,11 @@ write_files:
     permissions: '0755'
     content: |
       #!/bin/sh
-  
-      ip route | grep -v default | grep -v ${PRIVATE_NETWORK_CIDR} | awk '{print
-      $1}' | xargs -r -n1 sudo ip route del
-  
-      # ip route | grep -v eth0 | grep -v default | grep -v
-      ${PRIVATE_NETWORK_CIDR} xargs -I {} sh -c 'sudo ip route del {}'
+      ip route \
+        | grep -v default \
+        | grep -v '${PRIVATE_NETWORK_CIDR}' \
+        | cut -d' ' -f1 \
+        | xargs -r -n1 sudo ip route del
   - path: /etc/systemd/system/contabo-network-cleanup.service
     owner: 'root:root'
     permissions: '0644'

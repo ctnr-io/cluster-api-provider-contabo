@@ -261,6 +261,9 @@ golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
 
+OS := $(shell uname | tr '[:upper:]' '[:lower:]')
+ARCH := $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
+
 .PHONY: clusterctl
 clusterctl: $(CLUSTERCTL) ## Download clusterctl locally if necessary.
 $(CLUSTERCTL): $(LOCALBIN)
@@ -268,7 +271,7 @@ $(CLUSTERCTL): $(LOCALBIN)
 		set -e; \
 		echo "Downloading clusterctl $(CLUSTERCTL_VERSION)"; \
 		rm -f $(CLUSTERCTL); \
-		curl -L https://github.com/kubernetes-sigs/cluster-api/releases/download/$(CLUSTERCTL_VERSION)/clusterctl-darwin-arm64 -o $(CLUSTERCTL)-$(CLUSTERCTL_VERSION); \
+		curl -L https://github.com/kubernetes-sigs/cluster-api/releases/download/$(CLUSTERCTL_VERSION)/clusterctl-$(OS)-$(ARCH) -o $(CLUSTERCTL)-$(CLUSTERCTL_VERSION); \
 		chmod +x $(CLUSTERCTL)-$(CLUSTERCTL_VERSION); \
 	}; \
 	ln -sf $$(realpath $(CLUSTERCTL)-$(CLUSTERCTL_VERSION)) $(CLUSTERCTL)

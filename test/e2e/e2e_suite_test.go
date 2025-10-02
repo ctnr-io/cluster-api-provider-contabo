@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"sync"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -77,12 +78,15 @@ var _ = BeforeSuite(func() {
 
 	// Delete all cluster resources across all namespaces
 	ParallelRun([]*exec.Cmd{
-		exec.Command("kubectl", "delete", "contaboclusters", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
-		exec.Command("kubectl", "delete", "contabomachines", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
-		exec.Command("kubectl", "delete", "machines", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
-		exec.Command("kubectl", "delete", "machinesets", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
-		exec.Command("kubectl", "delete", "clusters", "--all", "--all-namespaces", "--ignore-not-found=true", "--timeout=30s"),
+		exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+		exec.Command("kubectl", "delete", "contabomachines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+		exec.Command("kubectl", "delete", "machines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+		exec.Command("kubectl", "delete", "machinesets", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+		exec.Command("kubectl", "delete", "clusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
 	})
+	
+	// Wait for reconciliation
+	time.Sleep(30 * time.Second)
 
 	var cmd *exec.Cmd
 
@@ -160,5 +164,15 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
-
+	// Delete all cluster resources across all namespaces
+	ParallelRun([]*exec.Cmd{
+		exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+		exec.Command("kubectl", "delete", "contabomachines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+		exec.Command("kubectl", "delete", "machines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+		exec.Command("kubectl", "delete", "machinesets", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+		exec.Command("kubectl", "delete", "clusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+	})
+	
+	// Wait for reconciliation
+	time.Sleep(30 * time.Second)
 })

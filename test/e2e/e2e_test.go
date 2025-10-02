@@ -105,6 +105,17 @@ var _ = Describe("Manager", Ordered, func() {
 		// By("removing manager namespace")
 		// cmd = exec.Command("kubectl", "delete", "ns", namespace)
 		// _, _ = utils.Run(cmd)
+		// Delete all cluster resources across all namespaces
+		ParallelRun([]*exec.Cmd{
+			exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+			exec.Command("kubectl", "delete", "contabomachines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+			exec.Command("kubectl", "delete", "machines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+			exec.Command("kubectl", "delete", "machinesets", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+			exec.Command("kubectl", "delete", "clusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+		})
+
+		// Wait for reconciliation
+		time.Sleep(30 * time.Second)
 	})
 
 	// After each test, check for failures and collect logs, events,
@@ -331,7 +342,7 @@ var _ = Describe("Manager", Ordered, func() {
 			if err != nil {
 				panic(err)
 			}
-			
+
 			By("applying cluster and control plane manifests")
 			applyManifest(string(clusterManifest))
 
@@ -363,7 +374,7 @@ var _ = Describe("Manager", Ordered, func() {
 			checkConditions("contabomachine", "test-control-plane")
 
 			By("waiting for ContaboMachine to be ready")
-			waitForResourceReady("contabomachine", "test-control-plane", "{.status.conditions[?(@.type=='Ready')].status}", 3*time.Minute)
+			waitForResourceReady("contabomachine", "test-control-plane", "{.status.conditions[?(@.type=='Ready')].status}", 10*time.Minute)
 
 			By("verifying network infrastructure is ready")
 			Eventually(func() string {

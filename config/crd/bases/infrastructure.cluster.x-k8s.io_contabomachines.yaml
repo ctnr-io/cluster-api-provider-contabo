@@ -72,6 +72,10 @@ spec:
                   productId:
                     description: ProductID is the Contabo product ID (instance type)
                     type: string
+                  provisioningType:
+                    description: Field to know if should create a new instance or
+                      reuse an existing one
+                    type: string
                 required:
                 - productId
                 type: object

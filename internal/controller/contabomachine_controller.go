@@ -141,7 +141,8 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// Handle deleted machines
 	if !contaboMachine.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, contaboMachine, contaboCluster)
+		r.reconcileDelete(ctx, contaboMachine, contaboCluster)
+		return ctrl.Result{}, nil
 	}
 
 	// Handle non-deleted machines
@@ -163,12 +164,14 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 func (r *ContaboMachineReconciler) initializeMachine(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) ctrl.Result {
 	log := logf.FromContext(ctx)
 
+	if contaboMachine.Status.Instance == nil {
+		// Add finalizer (currently there to prevent update it when patching but we need to refactor)
+		controllerutil.AddFinalizer(contaboMachine, infrastructurev1beta2.MachineFinalizer)
+	}
+
 	// Automatically add cluster label to ContaboMachine for proper mapping
 	if contaboMachine.Labels == nil {
 		contaboMachine.Labels = make(map[string]string)
-
-		// Add finalizer (currently there to prevent update it when patching but we need to refactor)
-		controllerutil.AddFinalizer(contaboMachine, infrastructurev1beta2.MachineFinalizer)
 	}
 	// Set machine labels to contaboMachine
 	for key, value := range machine.Labels {
@@ -229,9 +232,6 @@ func (r *ContaboMachineReconciler) getBootstrapData(ctx context.Context, machine
 			Status: metav1.ConditionFalse,
 			Reason: infrastructurev1beta2.WaitingForBootstrapDataReason,
 		})
-		// if patchErr := r.patchHelper.Patch(ctx, contaboMachine); patchErr != nil {
-		// 	log.Error(patchErr, "failed to patch ContaboMachine")
-		// }
 		return "", ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
@@ -258,9 +258,6 @@ func (r *ContaboMachineReconciler) getBootstrapData(ctx context.Context, machine
 			Status: metav1.ConditionFalse,
 			Reason: infrastructurev1beta2.WaitingForBootstrapDataReason,
 		})
-		// if patchErr := r.patchHelper.Patch(ctx, contaboMachine); patchErr != nil {
-		// 	log.Error(patchErr, "failed to patch ContaboMachine")
-		// }
 		return "", ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
@@ -349,20 +346,38 @@ func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, con
 				Region:      &contaboCluster.Spec.PrivateNetwork.Region,
 			})
 			if err != nil {
+				body := []byte{}
+				if resp != nil && resp.Body != nil {
+					body = resp.Body
+				}
 				log.Info("Failed to find instance from Contabo API when looking for reusable instances",
-					"error", err, "body", string(resp.Body))
-				break
+					"error", err, "body", string(body))
+				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 			}
 			if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
+				if resp.StatusCode() == 429 {
+					// Rate limited, retry after 1 minute
+					log.Info("Rate limited by Contabo API when looking for reusable instances, will retry",
+						"statusCode", resp.StatusCode())
+					return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+				}
+				if resp.StatusCode() == 404 {
+					// No instances found, break the loop to create a new one
+					break
+				}
+				// Other error, log and retry after 30 seconds
 				log.Info("Failed to find instance from Contabo API when looking for reusable instances",
 					"statusCode", resp.StatusCode())
-				break
+				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 			}
-			if resp != nil && resp.JSON200 != nil && resp.JSON200.Data != nil && len(resp.JSON200.Data) > 0 {
+			if resp != nil && resp.JSON200 != nil && resp.JSON200.Data != nil {
+				if len(resp.JSON200.Data) == 0 {
+					break
+				}
 				i := 0
 				// Find instance with empty display name
 				for i = range resp.JSON200.Data {
-					if resp.JSON200.Data[i].DisplayName == displayNameEmpty {
+					if resp.JSON200.Data[i].DisplayName == displayNameEmpty && resp.JSON200.Data[i].CancelDate == nil {
 						contaboMachine.Status.Instance = convertListInstanceResponseData(&resp.JSON200.Data[i])
 
 						log.Info("Found reusable instance in Contabo API",
@@ -372,67 +387,60 @@ func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, con
 					}
 				}
 			}
+			if contaboMachine.Status.Instance != nil {
+				break
+			}
 
 			page += 1
+			// Wait to prevent rate limiting
+			time.Sleep(1 * time.Second)
 		}
 	}
 
 	// Create instance if no reusable instance was found
 	if contaboMachine.Status.Instance == nil {
-		// TODO: check for available instance that can be upgraded to the desired productId
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, errors.New("No reusable instance found, instance creation is currently disabled to avoid unexpected costs. Please delete unused instances in your Contabo account and retry.")
-		// log.Info("No reusable instance found in Contabo API, will create a new one",
-		// 	"instanceName", displayName,
-		// 	"productID", contaboMachine.Spec.Instance.ProductId,
-		// 	"region", contaboCluster.Spec.PrivateNetwork.Region)
+		switch {
+		case contaboMachine.Spec.Instance.ProvisioningType == nil:
+		case *contaboMachine.Spec.Instance.ProvisioningType == infrastructurev1beta2.ContaboInstanceProvisioningTypeReuseOnly:
+			log.Info("No reusable instance found in Contabo Api, user must intervene")
+			return ctrl.Result{}, nil
+		case *contaboMachine.Spec.Instance.ProvisioningType == infrastructurev1beta2.ContaboInstanceProvisioningTypeReuseOrCreate:
+			log.Info("No reusable instance found in Contabo API, will create a new one",
+				"productID", contaboMachine.Spec.Instance.ProductId,
+				"region", contaboCluster.Spec.PrivateNetwork.Region)
 
-		// sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
-		// imageId := DefaultUbuntuImageID
-		// region := *ConvertRegionToCreateInstanceRegion(contaboCluster.Spec.PrivateNetwork.Region)
+			sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
+			imageId := DefaultUbuntuImageID
+			region := *ConvertRegionToCreateInstanceRegion(contaboCluster.Spec.PrivateNetwork.Region)
 
-		// instanceCreateResp, err := r.ContaboClient.CreateInstanceWithResponse(ctx, &models.CreateInstanceParams{}, models.CreateInstanceRequest{
-		// 	DisplayName: &displayName,
-		// 	ProductId:   &contaboMachine.Spec.Instance.ProductId,
-		// 	ImageId:     &imageId,
-		// 	Region:      &region,
-		// 	SshKeys:     &sshKeys,
-		// })
-		// if err != nil || instanceCreateResp.StatusCode() < 200 || instanceCreateResp.StatusCode() >= 300 {
-		// 	return ctrl.Result{RequeueAfter: 30 * time.Second}, r.handleError(
-		// 		ctx,
-		// 		contaboMachine,
-		// 		err,
-		// 		infrastructurev1beta2.InstanceCreatingReason,
-		// 		"Failed to create instance",
-		// 	)
-		// }
+			instanceCreateResp, err := r.ContaboClient.CreateInstanceWithResponse(ctx, &models.CreateInstanceParams{}, models.CreateInstanceRequest{
+				ProductId: &contaboMachine.Spec.Instance.ProductId,
+				ImageId:   &imageId,
+				Region:    &region,
+				SshKeys:   &sshKeys,
+				AddOns: &models.CreateInstanceAddons{
+					PrivateNetworking: ptr.To(map[string]interface{}{}),
+				},
+			})
+			if err != nil || instanceCreateResp.StatusCode() < 200 || instanceCreateResp.StatusCode() >= 300 {
+				log.Error(err, "Failed to create instance in Contabo API",
+					"statusCode", instanceCreateResp.StatusCode(),
+					"body", string(instanceCreateResp.Body))
+				// Do nothing, never retry, user must intervene
+				return ctrl.Result{}, nil
+			}
 
-		// instanceId := instanceCreateResp.JSON201.Data[0].InstanceId
-		// log.Info("Created new instance in Contabo API",
-		// 	"instanceID", instanceId,
-		// 	"instanceName", displayName)
+			instanceId := instanceCreateResp.JSON201.Data[0].InstanceId
+			log.Info("Created new instance in Contabo API",
+				"instanceID", instanceId,
+			)
+			// Requeue to rollback to search for the instance again
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		default:
+			log.Info("Unknown Instance provisioningType", "provisioningType", contaboMachine.Spec.Instance.ProvisioningType)
+			return ctrl.Result{}, nil
+		}
 
-		// // Wait for instance to be fully created
-		// for {
-		// 	time.Sleep(10 * time.Second)
-		// 	instanceGetResp, err := r.ContaboClient.RetrieveInstanceWithResponse(ctx, instanceId, &models.RetrieveInstanceParams{})
-		// 	if err != nil || instanceGetResp.StatusCode() < 200 || instanceGetResp.StatusCode() >= 300 {
-		// 		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.handleError(
-		// 			ctx,
-		// 			contaboMachine,
-		// 			err,
-		// 			infrastructurev1beta2.InstanceCreatingReason,
-		// 			"Failed to retrieve instance after creation",
-		// 		)
-		// 	}
-		// 	if instanceGetResp.JSON200.Data[0].Status == models.InstanceStatusRunning {
-		// 		contaboMachine.Status.Instance = convertInstanceResponseData(&instanceGetResp.JSON200.Data[0])
-		// 		break
-		// 	}
-		// 	log.Info("Waiting for instance to be fully created",
-		// 		"instanceID", instanceId,
-		// 		"currentStatus", contaboMachine.Status.Instance.Status)
-		// }
 	}
 
 	displayName := formatDisplayName(contaboMachine, contaboCluster)
@@ -455,6 +463,31 @@ func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, con
 		}
 	}
 
+	// Add private networking in any case if not already added
+	privateNetworkFound := false
+	for _, addons := range contaboMachine.Status.Instance.AddOns {
+		if addons.Id == 1477 {
+			privateNetworkFound = true
+			break
+		}
+	}
+	if privateNetworkFound == false {
+		log.Info("Adding private networking to instance",
+			"instanceID", contaboMachine.Status.Instance.InstanceId)
+		_, err := r.ContaboClient.UpgradeInstance(ctx, contaboMachine.Status.Instance.InstanceId, nil, models.UpgradeInstanceJSONRequestBody{
+			PrivateNetworking: ptr.To(map[string]interface{}{}),
+		})
+		if err != nil {
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.handleError(
+				ctx,
+				contaboMachine,
+				err,
+				infrastructurev1beta2.InstanceCreatingReason,
+				"Failed to add private networking to instance",
+			)
+		}
+	}
+
 	// Set provider ID
 	contaboMachine.Spec.ProviderID = fmt.Sprintf("contabo://%d", contaboMachine.Status.Instance.InstanceId)
 
@@ -464,6 +497,10 @@ func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, con
 // validateInstanceStatus validates the instance status and handles error conditions
 func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
+
+	if contaboMachine.Status.Instance == nil {
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, fmt.Errorf("instance not yet available, waiting")
+	}
 
 	// Get the latest status from the instance
 	instanceResp, err := r.ContaboClient.RetrieveInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, nil)
@@ -761,7 +798,7 @@ func (r *ContaboMachineReconciler) updateMachineAddresses(ctx context.Context, c
 		if pnInstance.InstanceId == contaboMachine.Status.Instance.InstanceId {
 			addresses = append(addresses, clusterv1.MachineAddress{
 				Type:    clusterv1.MachineInternalIP,
-				Address: pnInstance.IpConfig.V4.Ip,
+				Address: pnInstance.PrivateIpConfig.V4[0].Ip,
 			})
 			break
 		}
@@ -785,11 +822,6 @@ func (r *ContaboMachineReconciler) updateMachineAddresses(ctx context.Context, c
 
 	// Update status addresses
 	contaboMachine.Status.Addresses = addresses
-
-	// Patch the ContaboMachine to save the updated addresses
-	// if patchErr := r.patchHelper.Patch(ctx, contaboMachine); patchErr != nil {
-	// 	log.Error(patchErr, "Failed to patch cluster status")
-	// }
 
 	return nil
 }
@@ -884,10 +916,12 @@ func (r *ContaboMachineReconciler) finalizeInstance(ctx context.Context, contabo
 		Status: metav1.ConditionTrue,
 		Reason: infrastructurev1beta2.InstanceReadyReason,
 	})
-	// if patchErr := r.patchHelper.Patch(ctx, contaboMachine); patchErr != nil {
-	// 	log.Error(patchErr, "failed to patch ContaboMachine")
-	// }
-	r.Recorder.Event(contaboMachine, corev1.EventTypeNormal, infrastructurev1beta2.InstanceReadyReason, "Instance is ready")
+	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.MachineReadyCondition,
+		Status: metav1.ConditionTrue,
+		Reason: infrastructurev1beta2.InstanceReadyCondition,
+	})
+	// r.Recorder.Event(contaboMachine, corev1.EventTypeNormal, infrastructurev1beta2.InstanceReadyReason, "Instance is ready")
 
 	log.Info("Instance is ready",
 		"instanceID", contaboMachine.Status.Instance.InstanceId,
@@ -896,7 +930,7 @@ func (r *ContaboMachineReconciler) finalizeInstance(ctx context.Context, contabo
 	return ctrl.Result{}, nil
 }
 
-func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
+func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) {
 	_ = contaboCluster // may be used in future for cluster-specific cleanup logic
 	log := logf.FromContext(ctx)
 
@@ -908,9 +942,6 @@ func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, contaboM
 		Status: metav1.ConditionFalse,
 		Reason: infrastructurev1beta2.InstanceDeletingReason,
 	})
-	// if patchErr := r.patchHelper.Patch(ctx, contaboMachine); patchErr != nil {
-	// 	log.Error(patchErr, "Failed to patch cluster status")
-	// }
 	log.Info("Machine marked for deletion, proceeding with instance cleanup",
 		"name", contaboMachine.Name)
 
@@ -919,7 +950,7 @@ func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, contaboM
 		log.Info("Instance is already nil, assuming it is deleted, removing finalizer",
 			"name", contaboMachine.Name)
 		controllerutil.RemoveFinalizer(contaboMachine, infrastructurev1beta2.MachineFinalizer)
-		return ctrl.Result{}, nil
+		return
 	}
 
 	// First, stop the instance
@@ -968,8 +999,6 @@ func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, contaboM
 	// Remove finalizer
 	controllerutil.RemoveFinalizer(contaboMachine, infrastructurev1beta2.MachineFinalizer)
 	log.Info("Removed finalizer from ContaboMachine")
-
-	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -1264,16 +1293,11 @@ func (r *ContaboMachineReconciler) handleError(ctx context.Context, contaboMachi
 		Message: message,
 	})
 
-	// Patch the machine status
-	// if patchErr := r.patchHelper.Patch(ctx, contaboMachine); patchErr != nil {
-	// 	log.Error(patchErr, "Failed to patch ContaboMachine status")
-	// }
-
 	// Log the error
 	log.Error(err, message)
 
 	// Record event
-	r.Recorder.Event(contaboMachine, corev1.EventTypeWarning, reason, message)
+	// r.Recorder.Event(contaboMachine, corev1.EventTypeWarning, reason, message)
 
 	return fmt.Errorf("%s: %w", message, err)
 }

@@ -163,7 +163,6 @@ func DecodeHTTPResponse[T any](resp *http.Response, err error) (*T, error) {
 	if err != nil {
 		return result, fmt.Errorf("HTTP request error: %w", err)
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -174,6 +173,11 @@ func DecodeHTTPResponse[T any](resp *http.Response, err error) (*T, error) {
 	if err != nil {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return result, fmt.Errorf("failed to decode HTTP response: %w: %s", err, string(bodyBytes))
+	}
+
+	err = resp.Body.Close()
+	if err != nil {
+		return result, fmt.Errorf("failed to close response body: %w", err)
 	}
 
 	return result, nil

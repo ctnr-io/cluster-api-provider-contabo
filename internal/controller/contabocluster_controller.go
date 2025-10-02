@@ -114,7 +114,7 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// Handle deleted clusters
 	if !contaboCluster.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, contaboCluster)
+		return ctrl.Result{}, r.reconcileDelete(ctx, contaboCluster)
 	}
 
 	// Handle non-deleted clusters
@@ -143,8 +143,8 @@ func (r *ContaboClusterReconciler) reconcileApply(ctx context.Context, contaboCl
 	}
 
 	// Check if control plane endpoint is set
-	if result, err := r.reconcileControlPlaneEndpoint(ctx, contaboCluster); err != nil || result.RequeueAfter != 0 {
-		return result, err
+	if result := r.reconcileControlPlaneEndpoint(ctx, contaboCluster); result.RequeueAfter != 0 {
+		return result, nil
 	}
 
 	// Mark cluster as ready if all components are ready
@@ -170,9 +170,6 @@ func (r *ContaboClusterReconciler) markClusterReady(ctx context.Context, contabo
 	contaboCluster.Status.Initialization = &infrastructurev1beta2.ContaboClusterInitializationStatus{
 		Provisioned: true,
 	}
-	// if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
-	// 	log.Error(patchErr, "Failed to patch cluster status")
-	// }
 }
 
 // ensureClusterUUID ensures the cluster has a unique UUID and returns it
@@ -189,9 +186,6 @@ func (r *ContaboClusterReconciler) ensureClusterUUID(ctx context.Context, contab
 			Status: metav1.ConditionFalse,
 			Reason: infrastructurev1beta2.ClusterCreatingReason,
 		})
-		// if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
-		// 	log.Error(patchErr, "Failed to patch cluster status")
-		// }
 		log.Info("Assigned new cluster UUID", "clusterUUID", clusterUUID)
 		return clusterUUID
 	}
@@ -205,9 +199,6 @@ func (r *ContaboClusterReconciler) ensureClusterUUID(ctx context.Context, contab
 			Status: metav1.ConditionFalse,
 			Reason: infrastructurev1beta2.ClusterUpdatingReason,
 		})
-		// if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
-		// 	log.Error(patchErr, "Failed to patch cluster status")
-		// }
 		log.Info("Cluster already has a UUID, continuing reconciliation", "clusterUUID", clusterUUID)
 	}
 
@@ -273,9 +264,6 @@ func (r *ContaboClusterReconciler) reconcilePrivateNetwork(ctx context.Context, 
 			Status: metav1.ConditionTrue,
 			Reason: infrastructurev1beta2.ClusterAvailableReason,
 		})
-		// if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
-		// 	log.Error(patchErr, "Failed to patch cluster status")
-		// }
 		log.Info("Using private network", "privateNetworkName", privateNetwork.Name, "privateNetworkId", privateNetwork.PrivateNetworkId)
 	}
 	// else {
@@ -407,9 +395,6 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 			Status: metav1.ConditionTrue,
 			Reason: infrastructurev1beta2.ClusterAvailableReason,
 		})
-		// if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
-		// 	log.Error(patchErr, "Failed to patch cluster status")
-		// }
 		log.Info("Using SSH key", "sshKeyName", sshKey.Name, "sshKeyId", sshKey.SecretId)
 	}
 	// else {
@@ -420,14 +405,14 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 }
 
 // reconcileControlPlaneEndpoint ensures the control plane endpoint is set
-func (r *ContaboClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
+func (r *ContaboClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) ctrl.Result {
 	log := logf.FromContext(ctx)
 
 	// TODO: Handle case where control plane endpoint is set but not reachable
 
 	// Check if control plane endpoint is set
 	if contaboCluster.Spec.ControlPlaneEndpoint != nil {
-		return ctrl.Result{}, nil
+		return ctrl.Result{}
 	}
 
 	// Retrieve control plane endpoint from the first ContaboMachine in the cluster
@@ -442,13 +427,13 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Con
 			Status: metav1.ConditionFalse,
 			Reason: clusterv1.WaitingForControlPlaneInitializedReason,
 		})
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 10 * time.Second}
 	}
 
 	firstControlPlaneMachine := machineList.Items[0]
 	if firstControlPlaneMachine.Status.Instance == nil || firstControlPlaneMachine.Status.Instance.IpConfig.V4.Ip == "" {
 		log.Info("Control plane machine instance or IP not yet available, requeuing", "machine", firstControlPlaneMachine.Name)
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 10 * time.Second}
 	}
 
 	// Set control plane endpoint
@@ -462,16 +447,13 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Con
 		Status: metav1.ConditionTrue,
 		Reason: clusterv1.ClusterControlPlaneMachinesReadyReason,
 	})
-	// if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
-	// 	log.Error(patchErr, "Failed to patch cluster status")
-	// }
 	log.Info("Using control plane endpoint", "controlPlaneEndpoint", contaboCluster.Spec.ControlPlaneEndpoint)
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{}
 }
 
 // reconcileDelete may return different ctrl.Result values in future implementations
-func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
+func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
 	log := logf.FromContext(ctx)
 
 	log.Info("Reconciling ContaboCluster delete")
@@ -482,9 +464,6 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 		Status: metav1.ConditionFalse,
 		Reason: infrastructurev1beta2.ClusterDeletingReason,
 	})
-	// if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
-	// 	log.Error(patchErr, "Failed to patch cluster status")
-	// }
 	log.Info("Cluster marked for deletion, proceeding with resource cleanup")
 
 	// Delete network infrastructure
@@ -494,9 +473,6 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 			Status: metav1.ConditionFalse,
 			Reason: infrastructurev1beta2.ClusterPrivateNetworkDeletingReason,
 		})
-		// if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
-		// 	log.Error(patchErr, "Failed to patch cluster status")
-		// }
 		log.Info("Deleting private network", "privateNetworkId", contaboCluster.Status.PrivateNetwork.PrivateNetworkId)
 		// Check if private network exists in Contabo API
 		resp, err := r.ContaboClient.RetrievePrivateNetworkWithResponse(ctx, contaboCluster.Status.PrivateNetwork.PrivateNetworkId, nil)
@@ -510,7 +486,7 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 			if len(privateNetwork.Instances) > 0 {
 				for _, instance := range privateNetwork.Instances {
 					if _, err := r.ContaboClient.UnassignInstancePrivateNetwork(ctx, contaboCluster.Status.PrivateNetwork.PrivateNetworkId, instance.InstanceId, nil); err != nil {
-						return ctrl.Result{}, r.handleError(
+						return r.handleError(
 							ctx,
 							contaboCluster,
 							err,
@@ -525,7 +501,7 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 
 			// Delete private network
 			if _, err := r.ContaboClient.DeletePrivateNetwork(ctx, privateNetwork.PrivateNetworkId, nil); err != nil {
-				return ctrl.Result{}, r.handleError(
+				return r.handleError(
 					ctx,
 					contaboCluster,
 					err,
@@ -539,9 +515,6 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 			contaboCluster.Status.PrivateNetwork = nil
 			// This fail with conflict
 			// meta.RemoveStatusCondition(&contaboCluster.Status.Conditions, infrastructurev1beta2.ClusterPrivateNetworkReadyCondition)
-			// if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
-			// 	log.Error(patchErr, "Failed to patch cluster status")
-			// }
 			log.Info("Deleted private network", "privateNetworkId", privateNetwork.PrivateNetworkId)
 		}
 	}
@@ -553,9 +526,6 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 			Status: metav1.ConditionFalse,
 			Reason: infrastructurev1beta2.ClusterSshKeyDeletingReason,
 		})
-		// if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
-		// 	log.Error(patchErr, "Failed to patch cluster status")
-		// }
 		log.Info("Deleting SSH key", "sshKeyID", contaboCluster.Status.SshKey.SecretId)
 
 		// Check if SSH key exists in Contabo API
@@ -566,7 +536,7 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 		} else {
 			// Delete SSH key
 			if _, err := r.ContaboClient.DeleteSecret(ctx, contaboCluster.Status.SshKey.SecretId, nil); err != nil {
-				return ctrl.Result{}, r.handleError(
+				return r.handleError(
 					ctx,
 					contaboCluster,
 					err,
@@ -582,16 +552,13 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 		contaboCluster.Status.SshKey = nil
 		// This fail with conflict
 		// meta.RemoveStatusCondition(&contaboCluster.Status.Conditions, infrastructurev1beta2.ClusterSshKeyReadyCondition)
-		// if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
-		// 	log.Error(patchErr, "Failed to patch cluster status")
-		// }
 		log.Info("Deleted SSH key", "name", sshKeyName)
 	}
 
 	// Remove our finalizer from the list and update it.
 	controllerutil.RemoveFinalizer(contaboCluster, infrastructurev1beta2.ClusterFinalizer)
 
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -653,12 +620,7 @@ func (r *ContaboClusterReconciler) handleError(ctx context.Context, contaboClust
 	log.Error(err, message)
 
 	// Record event
-	r.Recorder.Event(contaboCluster, corev1.EventTypeWarning, reason, message)
-
-	// Patch the machine status
-	// if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
-	// 	log.Error(patchErr, "Failed to patch ContaboMachine status")
-	// }
+	// r.Recorder.Event(contaboCluster, corev1.EventTypeWarning, reason, message)
 
 	return fmt.Errorf("%s: %w", message, err)
 }
