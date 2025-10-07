@@ -57,8 +57,8 @@ const (
 )
 
 // BuildProviderID constructs a provider ID from an instance ID
-func BuildProviderID(instanceID int64) string {
-	return fmt.Sprintf("%s%d", ProviderIDPrefix, instanceID)
+func BuildProviderID(instanceName string) string {
+	return fmt.Sprintf("%s%s", ProviderIDPrefix, instanceName)
 }
 
 // ParseProviderID extracts the instance ID from a provider ID

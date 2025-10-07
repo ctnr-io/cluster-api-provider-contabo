@@ -5,7 +5,6 @@ import * as network from "./cloud-config/network.ts";
 import * as containerd from "./cloud-config/containerd.ts";
 import * as gvisor from './cloud-config/gvisor.ts'
 import * as kubeadm from "./cloud-config/kubeadm.ts";
-import * as etcdBackup from "./cloud-config/etcd-backup.ts";
 import { Packages, RunCmd } from "./cloud-config/types.ts";
 
 export const packageUpdate: boolean = [
@@ -13,7 +12,6 @@ export const packageUpdate: boolean = [
   containerd.packageUpdate,
   gvisor.packageUpdate,
   kubeadm.packageUpdate,
-  etcdBackup.packageUpdate,
 ]
   .some((
     x,
@@ -25,7 +23,6 @@ export const packages: Packages = [
     containerd.packages,
     gvisor.packages,
     kubeadm.packages,
-    etcdBackup.packages,
   ].flat()),
 ];
 
@@ -34,7 +31,6 @@ export const writeFiles = [
   ...kubeadm.writeFiles,
   ...gvisor.writeFiles,
   ...containerd.writeFiles,
-  ...etcdBackup.writeFiles,
 ].map((item) => ({ ...item, content: item.content.noindent().trim() }));
 
 export const runcmd: RunCmd = [
@@ -42,7 +38,6 @@ export const runcmd: RunCmd = [
   containerd.runcmd,
   gvisor.runcmd,
   kubeadm.runcmd,
-  etcdBackup.runcmd,
 ].flat();
 
 export default yaml`

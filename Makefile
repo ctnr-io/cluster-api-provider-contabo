@@ -90,9 +90,9 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 	esac
 
 .PHONY: test-e2e
-test-e2e: setup-test-e2e manifests generate fmt vet clusterctl ## Run the e2e tests. Expected an isolated environment using Kind.
+test-e2e: setup-test-e2e manifests generate fmt vet clusterctl cilium ## Run the e2e tests. Expected an isolated environment using Kind.
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) CLUSTERCTL=$(CLUSTERCTL) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
-	$(MAKE) cleanup-test-e2e
+# 	cleanup-test-e2e
 
 .PHONY: test-e2e.re
 test-e2e.re: cleanup-test-e2e
@@ -216,6 +216,7 @@ GODERIVE ?= $(LOCALBIN)/goderive
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 CLUSTERCTL ?= $(LOCALBIN)/clusterctl
+CILIUM ?= $(LOCALBIN)/cilium
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.6.0
@@ -227,6 +228,8 @@ ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
 GOLANGCI_LINT_VERSION ?= v2.3.0
 CLUSTERCTL_VERSION ?= v1.11.1
+CILIUM_CLI_VERSION ?= $(shell curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -275,6 +278,15 @@ $(CLUSTERCTL): $(LOCALBIN)
 		chmod +x $(CLUSTERCTL)-$(CLUSTERCTL_VERSION); \
 	}; \
 	ln -sf $$(realpath $(CLUSTERCTL)-$(CLUSTERCTL_VERSION)) $(CLUSTERCTL)
+
+.PHONY: cilium
+cilium: $(CILIUM) ## Download cilium CLI locally if necessary.
+$(CILIUM):
+	curl -L --fail --remote-name-all https://github.com/cilium/cilium-cli/releases/download/$(CILIUM_CLI_VERSION)/cilium-$(OS)-$(ARCH).tar.gz{,.sha256sum}
+	sha256sum --check cilium-$(OS)-$(ARCH).tar.gz.sha256sum
+	tar xzvfC cilium-$(OS)-$(ARCH).tar.gz $(LOCALBIN)
+	rm cilium-$(OS)-$(ARCH).tar.gz{,.sha256sum}
+	touch $(CILIUM)
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary

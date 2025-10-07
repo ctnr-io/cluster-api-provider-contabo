@@ -19,6 +19,7 @@ package utils
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,6 +27,15 @@ import (
 
 	. "github.com/onsi/ginkgo/v2" // nolint:revive,staticcheck
 )
+
+// Base64Decode decodes a base64-encoded string and returns the decoded string or an error.
+func Base64Decode(s string) (string, error) {
+	decoded, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return "", err
+	}
+	return string(decoded), nil
+}
 
 const (
 	certmanagerVersion = "v1.18.2"

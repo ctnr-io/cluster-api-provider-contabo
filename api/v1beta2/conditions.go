@@ -183,6 +183,9 @@ const (
 
 	// InstanceReinstallingReason indicates the instance is being reinstalled.
 	InstanceReinstallingReason = "InstanceReinstalling"
+
+	// InstanceWaitingForCloudInitReason indicates waiting for cloud-init to complete.
+	InstanceWaitingForCloudInitReason = "InstanceWaitingForCloudInit"
 )
 
 // Machine private network condition reasons.

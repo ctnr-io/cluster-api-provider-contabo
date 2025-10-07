@@ -29,7 +29,7 @@ import (
 type ContaboMachineSpec struct {
 	// ProviderID is the unique identifier as specified by the cloud provider.
 	// +optional
-	ProviderID string `json:"providerID"`
+	ProviderID *string `json:"providerID,omitempty"`
 
 	// Instance is the type of instance to create.
 	Instance ContaboInstanceSpec `json:"instance"`
@@ -37,11 +37,16 @@ type ContaboMachineSpec struct {
 
 // ContaboMachineStatus defines the observed state of ContaboMachine.
 type ContaboMachineStatus struct {
-	// Ready is true when the provider resource is ready.
+	// Ready is true when the provider resource is ready (provisioned not bootstraped). Needed by CABPK and CAPI.
 	// +optional
 	Ready bool `json:"ready"`
 
+	// Available is true when the provider resource is available for use (provisioned and bootstraped).
+	// +optional
+	Available bool `json:"available"`
+
 	// Instance is the current state of the Contabo instance.
+	// +optional
 	Instance *ContaboInstanceStatus `json:"instance,omitempty"`
 
 	// Addresses contains the Contabo instance associated addresses.
@@ -51,7 +56,8 @@ type ContaboMachineStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// Initialization
+	// Initialization, needed to be able to bootstrap the machine
+	// +optional
 	Initialization *ContaboMachineInitializationStatus `json:"initialization,omitempty"`
 
 	// FailureReason will be set in the event that there is a terminal problem

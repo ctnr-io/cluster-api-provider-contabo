@@ -106,13 +106,13 @@ var _ = Describe("Manager", Ordered, func() {
 		// cmd = exec.Command("kubectl", "delete", "ns", namespace)
 		// _, _ = utils.Run(cmd)
 		// Delete all cluster resources across all namespaces
-		ParallelRun([]*exec.Cmd{
-			exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-			exec.Command("kubectl", "delete", "contabomachines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-			exec.Command("kubectl", "delete", "machines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-			exec.Command("kubectl", "delete", "machinesets", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-			exec.Command("kubectl", "delete", "clusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-		})
+		// ParallelRun([]*exec.Cmd{
+		// 	exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+		// 	exec.Command("kubectl", "delete", "contabomachines", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+		// 	exec.Command("kubectl", "delete", "machines", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+		// 	exec.Command("kubectl", "delete", "machinesets", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+		// 	exec.Command("kubectl", "delete", "clusters", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+		// })
 
 		// Wait for reconciliation
 		time.Sleep(30 * time.Second)
@@ -345,12 +345,15 @@ var _ = Describe("Manager", Ordered, func() {
 
 			By("applying cluster and control plane manifests")
 			applyManifest(string(clusterManifest))
+			Expect(err).NotTo(HaveOccurred())
 
 			By("verifying cluster resources are created")
 			waitForResource("cluster", "test-cluster", 30*time.Second)
 			waitForResource("contabocluster", "test-cluster", 30*time.Second)
 			waitForResource("machine", "test-control-plane", 30*time.Second)
 			waitForResource("contabomachine", "test-control-plane", 30*time.Second)
+			waitForResource("machine", "test-worker", 30*time.Second)
+			waitForResource("contabomachine", "test-worker", 30*time.Second)
 
 			By("verifying V76 product type is configured for control plane machine")
 			Eventually(func() string {
@@ -372,24 +375,129 @@ var _ = Describe("Manager", Ordered, func() {
 
 			By("verifying ContaboMachine conditions are properly set")
 			checkConditions("contabomachine", "test-control-plane")
+			checkConditions("contabomachine", "test-worker")
 
-			By("waiting for ContaboMachine to be ready")
-			waitForResourceReady("contabomachine", "test-control-plane", "{.status.conditions[?(@.type=='Ready')].status}", 10*time.Minute)
-
-			By("verifying network infrastructure is ready")
+			By("waiting for ContaboMachine Initialization.Provisioned to be true (control plane)")
 			Eventually(func() string {
-				output, _ := kubectl("get", "contabocluster", "test-cluster", "-n", testNamespace, "-o", "jsonpath={.status.conditions[?(@.type=='NetworkInfrastructureReady')].status}")
-				return strings.TrimSpace(output)
-			}, 2*time.Minute, 10*time.Second).Should(Equal("True"))
+				output, _ := kubectl("get", "contabomachine", "test-control-plane", "-n", testNamespace, "-o", "jsonpath={.status.initialization.provisioned}")
+				return strings.ToLower(strings.TrimSpace(output))
+			}, 5*time.Minute, 5*time.Second).Should(Equal("true"))
 
-			By("checking controller logs show successful reconciliation")
+			By("waiting for ContaboMachine Initialization.Provisioned to be true (worker)")
 			Eventually(func() string {
-				logs, _ := kubectl("logs", controllerPodName, "-n", namespace, "--tail=50")
-				return logs
-			}, 1*time.Minute, 5*time.Second).Should(And(
-				ContainSubstring("test-cluster"),
-				ContainSubstring("reconciled successfully"),
-			))
+				output, _ := kubectl("get", "contabomachine", "test-worker", "-n", testNamespace, "-o", "jsonpath={.status.initialization.provisioned}")
+				return strings.ToLower(strings.TrimSpace(output))
+			}, 5*time.Minute, 5*time.Second).Should(Equal("true"))
+
+			By("waiting for ContaboMachine Addresses to be set (control plane)")
+			Eventually(func() string {
+				output, _ := kubectl("get", "contabomachine", "test-control-plane", "-n", testNamespace, "-o", "jsonpath={.status.addresses}")
+				return output
+			}, 5*time.Minute, 5*time.Second).ShouldNot(BeEmpty())
+
+			By("waiting for ContaboMachine Addresses to be set (worker)")
+			Eventually(func() string {
+				output, _ := kubectl("get", "contabomachine", "test-worker", "-n", testNamespace, "-o", "jsonpath={.status.addresses}")
+				return output
+			}, 5*time.Minute, 5*time.Second).ShouldNot(BeEmpty())
+
+			By("waiting for ContaboMachine Ready to be true (control plane)")
+			Eventually(func() string {
+				output, _ := kubectl("get", "contabomachine", "test-control-plane", "-n", testNamespace, "-o", "jsonpath={.status.ready}")
+				return strings.ToLower(strings.TrimSpace(output))
+			}, 10*time.Minute, 5*time.Second).Should(Equal("true"))
+
+			By("waiting for ContaboMachine Ready to be true (worker)")
+			Eventually(func() string {
+				output, _ := kubectl("get", "contabomachine", "test-worker", "-n", testNamespace, "-o", "jsonpath={.status.ready}")
+				return strings.ToLower(strings.TrimSpace(output))
+			}, 10*time.Minute, 5*time.Second).Should(Equal("true"))
+
+			By("waiting for workload cluster kubeconfig secret to be available")
+			var kubeconfigB64 string
+			Eventually(func() string {
+				output, _ := kubectl("get", "secret", "test-cluster-kubeconfig", "-n", testNamespace, "-o", "jsonpath={.data.value}")
+				kubeconfigB64 = output
+				return output
+			}, 10*time.Minute, 5*time.Second).ShouldNot(ContainSubstring("not found"))
+			By("fetching workload cluster kubeconfig and connecting to cluster")
+
+			// Write kubeconfig to file
+			kubeconfigPath := "/tmp/test-cluster.kubeconfig"
+			os.WriteFile(kubeconfigPath+".b64", []byte(kubeconfigB64), 0600)
+			decoded, err := utils.Base64Decode(kubeconfigB64)
+			Expect(err).NotTo(HaveOccurred())
+			err = os.WriteFile(kubeconfigPath, []byte(decoded), 0600)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Wait for control plane node to exists
+			By("waiting for control plane node to exist in workload cluster")
+			Eventually(func() string {
+				cmd := exec.Command("kubectl", "--kubeconfig", kubeconfigPath, "get", "nodes", "-o", "jsonpath={.items[0].metadata.labels}")
+				output, err := utils.Run(cmd)
+				if err != nil {
+					return ""
+				}
+				return output
+			}, 10*time.Minute, 10*time.Second).Should(ContainSubstring("node-role.kubernetes.io/control-plane"))
+
+			// Install Cilium CNI
+			By("installing Cilium CNI in workload cluster")
+			cmd := exec.Command("cilium", "install", "--version", "1.18.2", "--kubeconfig", kubeconfigPath)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Wait for all nodes to be Ready
+			By("waiting for all nodes to be Ready in workload cluster")
+			Eventually(func() string {
+				cmd := exec.Command("kubectl", "--kubeconfig", kubeconfigPath, "get", "nodes", "-o", "jsonpath={.items[*].status.conditions[?(@.type=='Ready')].status}")
+				output, err := utils.Run(cmd)
+				if err != nil {
+					return ""
+				}
+				return output
+			}, 10*time.Minute, 10*time.Second).Should(ContainSubstring("True True"))
+
+			// Test deletion
+			By("deleting the test cluster and machines")
+			_, err = kubectl("delete", "cluster", "test-cluster", "-n", testNamespace, "--timeout=120s", "--wait=true")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = kubectl("delete", "contabomachine", "test-control-plane", "-n", testNamespace, "--timeout=120s", "--wait=true")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = kubectl("delete", "contabomachine", "test-worker", "-n", testNamespace, "--timeout=120s", "--wait=true")
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for ContaboMachines to be deleted")
+			Eventually(func() error {
+				_, err := kubectl("get", "contabomachine", "test-control-plane", "-n", testNamespace)
+				return err
+			}, 2*time.Minute, 5*time.Second).ShouldNot(Succeed())
+			Eventually(func() error {
+				_, err := kubectl("get", "contabomachine", "test-worker", "-n", testNamespace)
+				return err
+			}, 2*time.Minute, 5*time.Second).ShouldNot(Succeed())
+
+			By("checking instance state with cntb CLI")
+			cmd = exec.Command("cntb", "get", "instances", "--output", "json")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "cntb CLI failed: %s", output)
+
+			type instance struct {
+				ID          int64  `json:"id"`
+				DisplayName string `json:"displayName"`
+			}
+			var instances []instance
+			err = json.Unmarshal([]byte(output), &instances)
+			Expect(err).NotTo(HaveOccurred(), "Failed to parse cntb output: %s", output)
+
+			// Both test-control-plane and test-worker should be reset to capc-available
+			foundAvailable := 0
+			for _, inst := range instances {
+				if strings.Contains(inst.DisplayName, "capc-available") {
+					foundAvailable++
+				}
+			}
+			Expect(foundAvailable).To(BeNumerically(">=", 2), "Expected at least 2 instances in capc-available state after deletion")
 		})
 	})
 })

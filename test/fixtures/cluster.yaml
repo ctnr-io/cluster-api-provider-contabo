@@ -1,4 +1,4 @@
----
+
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ContaboCluster
 metadata:
@@ -55,4 +55,41 @@ spec:
       apiGroup: bootstrap.cluster.x-k8s.io
       kind: KubeadmConfig
       name: test-control-plane
+  version: v1.34.1
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: ContaboMachine
+metadata:
+  name: test-worker
+  namespace: contabo-e2e-test
+spec:
+  instance:
+    productId: V78
+    provisioningType: Reuse
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+kind: KubeadmConfig
+metadata:
+  name: test-worker
+  namespace: contabo-e2e-test
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: Machine
+metadata:
+  name: test-worker
+  namespace: contabo-e2e-test
+  labels:
+    cluster.x-k8s.io/cluster-name: test-cluster
+    set: worker
+spec:
+  clusterName: test-cluster
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: ContaboMachine
+    name: test-worker
+  bootstrap:
+    configRef:
+      apiGroup: bootstrap.cluster.x-k8s.io
+      kind: KubeadmConfig
+      name: test-worker
   version: v1.34.1

@@ -115,6 +115,10 @@ spec:
                   - type
                   type: object
                 type: array
+              available:
+                description: Available is true when the provider resource is available
+                  for use (provisioned and bootstraped).
+                type: boolean
               conditions:
                 description: Conditions defines current service state of the ContaboMachine.
                 items:
@@ -211,7 +215,7 @@ spec:
                   controller's output.
                 type: string
               initialization:
-                description: Initialization
+                description: Initialization, needed to be able to bootstrap the machine
                 properties:
                   errorMessage:
                     description: ErrorMessage provides details in case of initialization
@@ -440,7 +444,8 @@ spec:
                 - vHostNumber
                 type: object
               ready:
-                description: Ready is true when the provider resource is ready.
+                description: Ready is true when the provider resource is ready (provisioned
+                  not bootstraped). Needed by CABPK and CAPI.
                 type: boolean
             type: object
         required:

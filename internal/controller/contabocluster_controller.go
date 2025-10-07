@@ -110,6 +110,8 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
 			log.Error(err, "failed to patch ContaboCluster")
 		}
+		// Wait to be sure patch is applied
+		time.Sleep(1 * time.Second)
 	}()
 
 	// Handle deleted clusters
@@ -124,7 +126,7 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 func (r *ContaboClusterReconciler) reconcileApply(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	log.Info("Starting ContaboCluster reconciliation state machine", "cluster", contaboCluster.Name)
+	log.Info("Starting ContaboCluster reconciliation", "cluster", contaboCluster.Name)
 
 	// Initialize basic cluster setup
 	controllerutil.AddFinalizer(contaboCluster, infrastructurev1beta2.ClusterFinalizer)
@@ -281,7 +283,7 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 	if contaboCluster.Status.SshKey == nil {
 		var sshKey *models.SecretResponse
 		sshKeyName := fmt.Sprintf("[capc] %s %s", contaboCluster.Name, clusterUUID)
-		sshKeySecretName := fmt.Sprintf("capc-%s-%s", contaboCluster.Name, clusterUUID)
+		sshKeySecretName := fmt.Sprintf("capc-sshkey-%s-%s", contaboCluster.Name, clusterUUID)
 
 		// Check if SSH key with the same name already exists in Contabo API
 		resp, _ := r.ContaboClient.RetrieveSecretListWithResponse(ctx, &models.RetrieveSecretListParams{

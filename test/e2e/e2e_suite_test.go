@@ -25,7 +25,6 @@ import (
 	"os/exec"
 	"sync"
 	"testing"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -73,21 +72,19 @@ func ParallelRun(cmds []*exec.Cmd) {
 }
 
 var _ = BeforeSuite(func() {
+	var err error
 	// Clean up any remaining Cluster API resources before uninstalling operators
 	_, _ = fmt.Fprintf(GinkgoWriter, "Cleaning up remaining Cluster API resources...\n")
 
 	// Delete all cluster resources across all namespaces
 	ParallelRun([]*exec.Cmd{
-		exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-		exec.Command("kubectl", "delete", "contabomachines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-		exec.Command("kubectl", "delete", "machines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-		exec.Command("kubectl", "delete", "machinesets", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-		exec.Command("kubectl", "delete", "clusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+		exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "contabomachines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "machines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "machinesets", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "clusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true"),
 	})
 	
-	// Wait for reconciliation
-	time.Sleep(30 * time.Second)
-
 	var cmd *exec.Cmd
 
 	// Remove clusterctl artifacts if any
@@ -130,7 +127,7 @@ var _ = BeforeSuite(func() {
 
 	By("building the manager(Operator) image and loading into Kind")
 	cmd = exec.Command("make", "docker-build-kind", fmt.Sprintf("IMG=%s", projectImage))
-	_, err := utils.Run(cmd)
+	_, err = utils.Run(cmd)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build and load the manager(Operator) image")
 
 	// The tests-e2e are intended to run on a temporary cluster that is created and destroyed for testing.
@@ -165,14 +162,14 @@ var _ = BeforeSuite(func() {
 
 var _ = AfterSuite(func() {
 	// Delete all cluster resources across all namespaces
-	ParallelRun([]*exec.Cmd{
-		exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-		exec.Command("kubectl", "delete", "contabomachines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-		exec.Command("kubectl", "delete", "machines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-		exec.Command("kubectl", "delete", "machinesets", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-		exec.Command("kubectl", "delete", "clusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-	})
+	// ParallelRun([]*exec.Cmd{
+	// 	exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+	// 	exec.Command("kubectl", "delete", "contabomachines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+	// 	exec.Command("kubectl", "delete", "machines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+	// 	exec.Command("kubectl", "delete", "machinesets", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+	// 	exec.Command("kubectl", "delete", "clusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
+	// })
 	
 	// Wait for reconciliation
-	time.Sleep(30 * time.Second)
+	// time.Sleep(30 * time.Second)
 })
