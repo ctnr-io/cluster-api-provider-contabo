@@ -184,8 +184,14 @@ const (
 	// InstanceReinstallingReason indicates the instance is being reinstalled.
 	InstanceReinstallingReason = "InstanceReinstalling"
 
+	// InstanceReinstallingFailedReason indicates the instance failed to reinstall.
+	InstanceReinstallingFailedReason = "InstanceReinstallingFailed"
+
 	// InstanceWaitingForCloudInitReason indicates waiting for cloud-init to complete.
 	InstanceWaitingForCloudInitReason = "InstanceWaitingForCloudInit"
+
+	// InstanceConfigureNodeReason indicates the instance is being configured as a cluster node.
+	InstanceConfigureNodeReason = "InstanceConfigureNode"
 )
 
 // Machine private network condition reasons.

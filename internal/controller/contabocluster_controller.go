@@ -132,15 +132,15 @@ func (r *ContaboClusterReconciler) reconcileApply(ctx context.Context, contaboCl
 	controllerutil.AddFinalizer(contaboCluster, infrastructurev1beta2.ClusterFinalizer)
 
 	// Ensure cluster has a unique UUID for global identification
-	clusterUUID := r.ensureClusterUUID(ctx, contaboCluster)
+	r.ensureClusterUUID(ctx, contaboCluster)
 
 	// Check if private network was created
-	if err := r.reconcilePrivateNetwork(ctx, contaboCluster, clusterUUID); err != nil {
+	if err := r.reconcilePrivateNetwork(ctx, contaboCluster); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	// Check if SSH key was created
-	if err := r.reconcileSSHKey(ctx, contaboCluster, clusterUUID); err != nil {
+	if err := r.reconcileSSHKey(ctx, contaboCluster); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -208,13 +208,13 @@ func (r *ContaboClusterReconciler) ensureClusterUUID(ctx context.Context, contab
 }
 
 // reconcilePrivateNetwork ensures the private network exists and is configured
-func (r *ContaboClusterReconciler) reconcilePrivateNetwork(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster, clusterUUID string) error {
+func (r *ContaboClusterReconciler) reconcilePrivateNetwork(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
 	log := logf.FromContext(ctx)
 
 	// Check if private network was created
 	if contaboCluster.Status.PrivateNetwork == nil {
 		var privateNetwork *models.PrivateNetworkResponse
-		privateNetworkName := fmt.Sprintf("[capc] %s %s", contaboCluster.Name, clusterUUID)
+		privateNetworkName := FormatPrivateNetworkName(contaboCluster)
 
 		// Check if private network with the same name already exists in Contabo API
 		resp, _ := r.ContaboClient.RetrievePrivateNetworkListWithResponse(ctx, &models.RetrievePrivateNetworkListParams{
@@ -276,14 +276,14 @@ func (r *ContaboClusterReconciler) reconcilePrivateNetwork(ctx context.Context, 
 }
 
 // reconcileSSHKey ensures the SSH key exists and is configured
-func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster, clusterUUID string) error {
+func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
 	log := logf.FromContext(ctx)
 
 	// Check if SSH key was created
 	if contaboCluster.Status.SshKey == nil {
 		var sshKey *models.SecretResponse
-		sshKeyName := fmt.Sprintf("[capc] %s %s", contaboCluster.Name, clusterUUID)
-		sshKeySecretName := fmt.Sprintf("capc-sshkey-%s-%s", contaboCluster.Name, clusterUUID)
+		sshKeyName := FormatSshKeyName(contaboCluster)
+		sshKeySecretName := FormatSshKeySecretName(contaboCluster)
 
 		// Check if SSH key with the same name already exists in Contabo API
 		resp, _ := r.ContaboClient.RetrieveSecretListWithResponse(ctx, &models.RetrieveSecretListParams{
@@ -380,7 +380,7 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 					err,
 					infrastructurev1beta2.ClusterSshKeyReadyCondition,
 					infrastructurev1beta2.ClusterSshKeyFailedReason,
-					"Failed to create SSH key secret",
+					fmt.Sprintf("Failed to submit SSH public key to Contabo API: %s", sshKeyName),
 				)
 			}
 			sshKey = &sshKeyCreateResp.JSON201.Data[0]

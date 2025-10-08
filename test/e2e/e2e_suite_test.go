@@ -76,7 +76,7 @@ var _ = BeforeSuite(func() {
 	// Clean up any remaining Cluster API resources before uninstalling operators
 	_, _ = fmt.Fprintf(GinkgoWriter, "Cleaning up remaining Cluster API resources...\n")
 
-	// Delete all cluster resources across all namespaces
+	// Delete all cluster resources across
 	ParallelRun([]*exec.Cmd{
 		exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true"),
 		exec.Command("kubectl", "delete", "contabomachines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true"),

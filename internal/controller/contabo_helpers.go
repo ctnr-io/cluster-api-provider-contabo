@@ -17,11 +17,12 @@ limitations under the License.
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"dario.cat/mergo"
@@ -62,18 +63,12 @@ func BuildProviderID(instanceName string) string {
 }
 
 // ParseProviderID extracts the instance ID from a provider ID
-func ParseProviderID(providerID string) (int64, error) {
+func ParseProviderID(providerID string) (string, error) {
 	if !strings.HasPrefix(providerID, ProviderIDPrefix) {
-		return 0, fmt.Errorf("invalid provider ID format: %s", providerID)
+		return "", fmt.Errorf("invalid provider ID format: %s", providerID)
 	}
-
 	instanceIDStr := strings.TrimPrefix(providerID, ProviderIDPrefix)
-	instanceID, err := strconv.ParseInt(instanceIDStr, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse instance ID from provider ID %s: %w", providerID, err)
-	}
-
-	return instanceID, nil
+	return instanceIDStr, nil
 }
 
 // ConvertRegionToCreateInstanceRegion converts a string region to the OpenAPI enum type
@@ -200,4 +195,45 @@ func mergeCloudConfig(file1, file2 []byte) ([]byte, error) {
 
 	// Marshal the merged config back to YAML
 	return yaml.Marshal(config1)
+}
+
+func Truncate[T []any | string](s T, maxLength int) T {
+	switch v := any(s).(type) {
+	case string:
+		if len(v) > maxLength {
+			return any(v[:maxLength]).(T)
+		}
+		return any(v).(T)
+	case []any:
+		if len(v) > maxLength {
+			return any(v[:maxLength]).(T)
+		}
+		return any(v).(T)
+	default:
+		panic("unsupported type")
+	}
+}
+
+func FormatDisplayName(contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) string {
+	// Create an hash based on the name and namespace to ensure uniqueness
+	name := fmt.Sprintf("%s-%s", contaboMachine.Namespace, contaboMachine.Name)
+	hash := sha256.New()
+	hash.Write([]byte(name))
+	hashSum := hash.Sum(nil) // Use first 6 bytes of the hash for brevity
+	// Format as hex string
+	hashSumStr := hex.EncodeToString(hashSum)[:32]
+	// Return the formatted display name
+	return Truncate(fmt.Sprintf("[capc] %s %s", contaboCluster.Status.ClusterUUID, hashSumStr), 255)
+}
+
+func FormatSshKeyName(contaboCluster *infrastructurev1beta2.ContaboCluster) string {
+	return Truncate(fmt.Sprintf("[capc] %s", contaboCluster.Status.ClusterUUID), 255)
+}
+
+func FormatSshKeySecretName(contaboCluster *infrastructurev1beta2.ContaboCluster) string {
+	return Truncate(fmt.Sprintf("capc-sshkey-%s", contaboCluster.Status.ClusterUUID), 253)
+}
+
+func FormatPrivateNetworkName(contaboCluster *infrastructurev1beta2.ContaboCluster) string {
+	return Truncate(fmt.Sprintf("[capc] %s", contaboCluster.Status.ClusterUUID), 255)
 }

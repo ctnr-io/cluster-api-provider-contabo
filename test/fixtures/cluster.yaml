@@ -18,6 +18,8 @@ spec:
     apiGroup: infrastructure.cluster.x-k8s.io
     kind: ContaboCluster
     name: test-cluster
+
+
 ---
 kind: KubeadmConfig
 apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
@@ -33,7 +35,7 @@ metadata:
 spec:
   instance:
     productId: V76
-    provisioningType: Reuse
+    provisioningType: ReuseOnly
 ---
 apiVersion: cluster.x-k8s.io/v1beta2
 kind: Machine
@@ -56,6 +58,15 @@ spec:
       kind: KubeadmConfig
       name: test-control-plane
   version: v1.34.1
+
+
+
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+kind: KubeadmConfig
+metadata:
+  name: test-worker
+  namespace: contabo-e2e-test
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ContaboMachine
@@ -65,13 +76,7 @@ metadata:
 spec:
   instance:
     productId: V78
-    provisioningType: Reuse
----
-apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
-kind: KubeadmConfig
-metadata:
-  name: test-worker
-  namespace: contabo-e2e-test
+    provisioningType: ReuseOnly
 ---
 apiVersion: cluster.x-k8s.io/v1beta2
 kind: Machine

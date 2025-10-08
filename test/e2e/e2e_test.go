@@ -105,14 +105,18 @@ var _ = Describe("Manager", Ordered, func() {
 		// By("removing manager namespace")
 		// cmd = exec.Command("kubectl", "delete", "ns", namespace)
 		// _, _ = utils.Run(cmd)
-		// Delete all cluster resources across all namespaces
-		// ParallelRun([]*exec.Cmd{
-		// 	exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-		// 	exec.Command("kubectl", "delete", "contabomachines", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-		// 	exec.Command("kubectl", "delete", "machines", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-		// 	exec.Command("kubectl", "delete", "machinesets", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-		// 	exec.Command("kubectl", "delete", "clusters", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
-		// })
+
+		// Wait a bit in case user want to CTRL-C to inspect the cluster
+		time.Sleep(10 * time.Second)
+
+		// Delete all cluster resources
+		ParallelRun([]*exec.Cmd{
+			exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+			exec.Command("kubectl", "delete", "contabomachines", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+			exec.Command("kubectl", "delete", "machines", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+			exec.Command("kubectl", "delete", "machinesets", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+			exec.Command("kubectl", "delete", "clusters", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+		})
 
 		// Wait for reconciliation
 		time.Sleep(30 * time.Second)
@@ -162,6 +166,7 @@ var _ = Describe("Manager", Ordered, func() {
 		}
 	})
 
+	SetDefaultTimeout(15 * time.Minute)
 	SetDefaultEventuallyTimeout(2 * time.Minute)
 	SetDefaultEventuallyPollingInterval(time.Second)
 
@@ -439,7 +444,7 @@ var _ = Describe("Manager", Ordered, func() {
 					return ""
 				}
 				return output
-			}, 10*time.Minute, 10*time.Second).Should(ContainSubstring("node-role.kubernetes.io/control-plane"))
+			}, 20*time.Minute, 10*time.Second).Should(ContainSubstring("node-role.kubernetes.io/control-plane"))
 
 			// Install Cilium CNI
 			By("installing Cilium CNI in workload cluster")
@@ -456,7 +461,7 @@ var _ = Describe("Manager", Ordered, func() {
 					return ""
 				}
 				return output
-			}, 10*time.Minute, 10*time.Second).Should(ContainSubstring("True True"))
+			}, 20*time.Minute, 10*time.Second).Should(ContainSubstring("True True"))
 
 			// Test deletion
 			By("deleting the test cluster and machines")
