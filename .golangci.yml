@@ -51,6 +51,7 @@ linters:
       - builtin$
       - examples$
       - pkg/contabo/.*/.*
+      - test/e2e/.*_test.go$
 formatters:
   enable:
     - gofmt

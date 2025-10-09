@@ -94,6 +94,8 @@ func (r *ContaboMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
+	log.Info("Reconciling ContaboMachine", "namespace", req.Namespace, "name", req.Name)
+
 	// Fetch the ContaboMachine instance
 	contaboMachine := &infrastructurev1beta2.ContaboMachine{}
 	if err := r.Get(ctx, req.NamespacedName, contaboMachine); err != nil {
@@ -417,199 +419,53 @@ func (r *ContaboMachineReconciler) provisionInstance(ctx context.Context, contab
 func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	if contaboMachine.Status.Instance != nil {
-		// Get the latest status from the instance
-		instanceResp, err := r.ContaboClient.RetrieveInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, nil)
-		if err != nil || instanceResp.StatusCode() < 200 || instanceResp.StatusCode() >= 300 {
-			return ctrl.Result{}, r.handleError(
-				ctx,
-				contaboMachine,
-				err,
-				infrastructurev1beta2.InstanceNotFoundReason,
-				fmt.Sprintf("Failed to find instance %d from Contabo API", contaboMachine.Status.Instance.InstanceId),
-			)
-		}
-		contaboMachine.Status.Instance = convertInstanceResponseData(&instanceResp.JSON200.Data[0])
-		log.Info("Found existing instance in Contabo API",
-			"instanceID", contaboMachine.Status.Instance.InstanceId,
+	// Try to find existing instance
+	instance, err := r.getExistingInstance(ctx, contaboMachine, contaboCluster)
+	if err != nil {
+		return ctrl.Result{}, r.handleError(
+			ctx,
+			contaboMachine,
+			err,
+			infrastructurev1beta2.InstanceNotFoundReason,
+			"Failed to find existing instance",
 		)
 	}
-
-	displayName := FormatDisplayName(contaboMachine, contaboCluster)
-	// Try to find an existing instance with the same display name
-	if contaboMachine.Status.Instance == nil {
-		instanceListResp, err := r.ContaboClient.RetrieveInstancesListWithResponse(ctx, &models.RetrieveInstancesListParams{
-			DisplayName: &displayName,
-		})
-		if err == nil && len(instanceListResp.JSON200.Data) > 0 {
-			contaboMachine.Status.Instance = convertListInstanceResponseData(&instanceListResp.JSON200.Data[0])
-			log.Info("Found existing instance in Contabo API by display name",
-				"instanceID", contaboMachine.Status.Instance.InstanceId,
-				"instanceName", contaboMachine.Status.Instance.Name)
-		}
+	if instance != nil {
+		contaboMachine.Status.Instance = instance
+		log.Info("Found existing instance", "instanceID", instance.InstanceId)
 	}
 
+	// Look for reusable instance if none found
 	if contaboMachine.Status.Instance == nil {
-		// Check for available reusable instances
-		displayNameEmpty := ""
-		page := int64(1)
-		size := int64(100)
-		for {
-			resp, err := r.ContaboClient.RetrieveInstancesListWithResponse(ctx, &models.RetrieveInstancesListParams{
-				Page:        &page,
-				Size:        &size,
-				DisplayName: &displayNameEmpty, // This would be nice but Contabo API does not support filtering for empty display name
-				ProductIds:  &contaboMachine.Spec.Instance.ProductId,
-				Region:      &contaboCluster.Spec.PrivateNetwork.Region,
-			})
-			if err != nil {
-				body := []byte{}
-				if resp != nil && resp.Body != nil {
-					body = resp.Body
-				}
-				log.Info("Failed to find instance from Contabo API when looking for reusable instances",
-					"error", err, "body", string(body))
-				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-			}
-			if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
-				if resp.StatusCode() == 429 {
-					// Rate limited, retry after 1 minute
-					log.Info("Rate limited by Contabo API when looking for reusable instances, will retry",
-						"statusCode", resp.StatusCode())
-					return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
-				}
-				if resp.StatusCode() == 404 {
-					// No instances found, break the loop to create a new one
-					break
-				}
-				// Other error, log and retry after 30 seconds
-				log.Info("Failed to find instance from Contabo API when looking for reusable instances",
-					"statusCode", resp.StatusCode())
-				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-			}
-			if resp != nil && resp.JSON200 != nil && resp.JSON200.Data != nil {
-				if len(resp.JSON200.Data) == 0 {
-					break
-				}
-				i := 0
-				// Find instance with empty display name
-				for i = range resp.JSON200.Data {
-					if resp.JSON200.Data[i].DisplayName == displayNameEmpty && resp.JSON200.Data[i].CancelDate == nil {
-						instance := convertListInstanceResponseData(&resp.JSON200.Data[i])
-						contaboMachine.Status.Instance = instance
-						log.Info("Found reusable instance in Contabo API",
-							"instanceID", contaboMachine.Status.Instance.InstanceId,
-							"instanceName", contaboMachine.Status.Instance.Name)
-
-						// Reset the instance by removing any private network assignments
-						if err := r.resetInstance(ctx, instance); err != nil {
-							log.Error(err, "Failed to reset instance",
-								"instanceID", instance.InstanceId)
-							continue
-						}
-						break
-					}
-				}
-			}
-			if contaboMachine.Status.Instance != nil {
-				break
-			}
-
-			page += 1
-			// Wait to prevent rate limiting
-			time.Sleep(5 * time.Second)
-		}
-	}
-
-	// Create instance if no reusable instance was found
-	if contaboMachine.Status.Instance == nil {
-		switch {
-		case contaboMachine.Spec.Instance.ProvisioningType == nil:
-		case *contaboMachine.Spec.Instance.ProvisioningType == infrastructurev1beta2.ContaboInstanceProvisioningTypeReuseOnly:
-			log.Info("No reusable instance found in Contabo Api, user must intervene")
-			return ctrl.Result{}, nil
-		case *contaboMachine.Spec.Instance.ProvisioningType == infrastructurev1beta2.ContaboInstanceProvisioningTypeReuseOrCreate:
-			log.Info("No reusable instance found in Contabo API, will create a new one",
-				"productID", contaboMachine.Spec.Instance.ProductId,
-				"region", contaboCluster.Spec.PrivateNetwork.Region)
-
-			sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
-			imageId := DefaultUbuntuImageID
-			region := *ConvertRegionToCreateInstanceRegion(contaboCluster.Spec.PrivateNetwork.Region)
-
-			instanceCreateResp, err := r.ContaboClient.CreateInstanceWithResponse(ctx, &models.CreateInstanceParams{}, models.CreateInstanceRequest{
-				ProductId: &contaboMachine.Spec.Instance.ProductId,
-				Period:    1,
-				ImageId:   &imageId,
-				Region:    &region,
-				SshKeys:   &sshKeys,
-				AddOns: &models.CreateInstanceAddons{
-					PrivateNetworking: ptr.To(map[string]interface{}{}),
-				},
-			})
-			if err != nil || instanceCreateResp.StatusCode() < 200 || instanceCreateResp.StatusCode() >= 300 {
-				log.Error(err, "Failed to create instance in Contabo API",
-					"statusCode", instanceCreateResp.StatusCode(),
-					"body", string(instanceCreateResp.Body))
-				// Do nothing, never retry, user must intervene
-				return ctrl.Result{}, nil
-			}
-
-			instanceId := instanceCreateResp.JSON201.Data[0].InstanceId
-			log.Info("Created new instance in Contabo API",
-				"instanceID", instanceId,
-			)
-			// Requeue to rollback to search for the instance again
-			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-		default:
-			log.Info("Unknown Instance provisioningType", "provisioningType", contaboMachine.Spec.Instance.ProvisioningType)
-			return ctrl.Result{}, nil
-		}
-
-	}
-
-	if contaboMachine.Status.Instance.DisplayName != displayName {
-		log.Info("Updating instance display name to mark it as used",
-			"instanceID", contaboMachine.Status.Instance.InstanceId,
-			"oldDisplayName", contaboMachine.Status.Instance.DisplayName,
-			"newDisplayName", displayName)
-		_, err := r.ContaboClient.PatchInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, nil, models.PatchInstanceRequest{
-			DisplayName: &displayName,
-		})
+		instance, err = r.findReusableInstance(ctx, contaboMachine, contaboCluster)
 		if err != nil {
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.handleError(
-				ctx,
-				contaboMachine,
-				err,
-				infrastructurev1beta2.InstanceCreatingReason,
-				"Failed to update instance display name",
-			)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+		if instance != nil {
+			contaboMachine.Status.Instance = instance
+			log.Info("Found reusable instance", "instanceID", instance.InstanceId)
 		}
 	}
 
-	// Add private networking in any case if not already added
-	privateNetworkFound := false
-	for _, addons := range contaboMachine.Status.Instance.AddOns {
-		if addons.Id == 1477 {
-			privateNetworkFound = true
-			break
-		}
-	}
-	if !privateNetworkFound {
-		log.Info("Adding private networking to instance",
-			"instanceID", contaboMachine.Status.Instance.InstanceId)
-		_, err := r.ContaboClient.UpgradeInstance(ctx, contaboMachine.Status.Instance.InstanceId, nil, models.UpgradeInstanceJSONRequestBody{
-			PrivateNetworking: ptr.To(map[string]interface{}{}),
-		})
+	// Create new instance if none found and provisioning type allows
+	if contaboMachine.Status.Instance == nil {
+		err = r.createNewInstance(ctx, contaboMachine, contaboCluster)
 		if err != nil {
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.handleError(
-				ctx,
-				contaboMachine,
-				err,
-				infrastructurev1beta2.InstanceCreatingReason,
-				"Failed to add private networking to instance",
-			)
+			return ctrl.Result{}, err
 		}
+		// Force requeue to retrieve instance via display name
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
+	// Update instance state (display name and networking)
+	if err := r.updateInstanceState(ctx, contaboMachine, contaboCluster, contaboMachine.Status.Instance); err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.handleError(
+			ctx,
+			contaboMachine,
+			err,
+			infrastructurev1beta2.InstanceCreatingReason,
+			"Failed to update instance state",
+		)
 	}
 
 	return ctrl.Result{}, nil
@@ -835,6 +691,8 @@ func (r *ContaboMachineReconciler) reconcilePrivateNetworkAssignment(ctx context
 				"Failed to reinstall instance after private network assignment",
 			)
 		}
+		// Wait a bit before checking the instance status again
+		time.Sleep(10 * time.Second)
 
 		// Requeue to wait for the instance to be fully restarted
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
@@ -1002,6 +860,11 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 			return ctrl.Result{}, err
 		}
 
+		if strings.Contains(*output, "status: runnine") {
+			log.Info("cloud-init is still running, will retry", "output", *output, "requeueAfter", "20s")
+			return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
+		}
+
 		log.Info("cloud-init has finished on instance",
 			"instanceID", contaboMachine.Status.Instance.InstanceId)
 
@@ -1026,7 +889,7 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 
 		kubeconfig, err := r.getKubeconfig(ctx, contaboCluster)
 		if err != nil {
-			log.Error(err, "Failed to get kubeconfig from owner Cluster",
+			log.Info("Waiting to get kubeconfig from owner Cluster",
 				"clusterName", machine.Spec.ClusterName,
 				"namespace", machine.Namespace)
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
@@ -1064,45 +927,62 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 			"nodeName", nodeName,
 			"instanceID", contaboMachine.Status.Instance.InstanceId)
 
-		// Update node external IPs if not already set
+		// Prepare complete address list including any missing external IPs
+		addresses := node.Status.Addresses
+		externalIPsToAdd := []corev1.NodeAddress{}
+
+		// Check which external IPs need to be added
 		for _, ip := range contaboMachine.Status.Addresses {
 			if ip.Type == clusterv1.MachineExternalIP {
 				hasIP := false
-				for _, addr := range node.Status.Addresses {
+				for _, addr := range addresses {
 					if addr.Type == corev1.NodeExternalIP && addr.Address == ip.Address {
 						hasIP = true
 						break
 					}
 				}
 				if !hasIP {
-					log.Info("Node is missing external IP, will patch it", "nodeName", nodeName, "missingIP", ip.Address)
-					// Patch the node to add the missing external IP
-					patchNode := &corev1.Node{
-						Status: corev1.NodeStatus{
-							Addresses: []corev1.NodeAddress{
-								{
-									Type:    corev1.NodeExternalIP,
-									Address: ip.Address,
-								},
-							},
-						},
-					}
-					patchBytes, err := json.Marshal(patchNode)
-					if err != nil {
-						log.Error(err, "Failed to marshal node status patch")
-						return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-					}
-
-					_, err = k8sClient.CoreV1().Nodes().Patch(ctx, nodeName, types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{}, "status")
-					if err != nil {
-						log.Error(err, "Failed to patch node with external IP", "nodeName", nodeName)
-						return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-					}
-					log.Info("Successfully patched node with external IP", "nodeName", nodeName, "addedIP", ip.Address)
+					log.Info("Found missing external IP to add", "nodeName", nodeName, "ip", ip.Address)
+					externalIPsToAdd = append(externalIPsToAdd, corev1.NodeAddress{
+						Type:    corev1.NodeExternalIP,
+						Address: ip.Address,
+					})
 				}
 			}
 		}
+
+		// Only patch if we have new IPs to add
+		if len(externalIPsToAdd) > 0 {
+			// Build complete address list
+			addresses = append(addresses, externalIPsToAdd...)
+
+			// Create patch with complete address list
+			patchNode := &corev1.Node{
+				Status: corev1.NodeStatus{
+					Addresses: addresses,
+				},
+			}
+
+			patchBytes, err := json.Marshal(patchNode)
+			if err != nil {
+				log.Error(err, "Failed to marshal node status patch")
+				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+			}
+
+			_, err = k8sClient.CoreV1().Nodes().Patch(ctx, nodeName, types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{}, "status")
+			if err != nil {
+				log.Error(err, "Failed to patch node with external IPs", "nodeName", nodeName)
+				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+			}
+			log.Info("Successfully patched node with external IPs", "nodeName", nodeName, "addedIPs", externalIPsToAdd)
+		}
 	}
+
+	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.InstanceBootstrapCondition,
+		Status: metav1.ConditionTrue,
+		Reason: infrastructurev1beta2.InstanceBootstrapedReason,
+	})
 
 	// Update ContaboMachine status with instance details
 	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
@@ -1528,17 +1408,12 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, instance *
 }
 
 func (r *ContaboMachineReconciler) getKubeconfig(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (string, error) {
-	log := logf.FromContext(ctx)
-
 	kubeconfigSecret := &corev1.Secret{}
 	kubeconfigSecretName := types.NamespacedName{
 		Namespace: contaboCluster.Namespace,
 		Name:      contaboCluster.Name + "-kubeconfig",
 	}
 	if err := r.Get(ctx, kubeconfigSecretName, kubeconfigSecret); err != nil {
-		log.Error(err, "Failed to get kubeconfig secret",
-			"namespace", kubeconfigSecretName.Namespace,
-			"name", kubeconfigSecretName.Name)
 		return "", err
 	}
 

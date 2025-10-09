@@ -42,7 +42,7 @@ type ContaboClusterStatus struct {
 
 	// ClusterUUID is the identifier of the Contabo cluster.
 	// +optional
-	ClusterUUID string `json:"clusterID,omitempty"`
+	ClusterUUID string `json:"clusterUUID,omitempty"`
 
 	// PrivateNetwork contains the discovered information about private networks
 	// +optional

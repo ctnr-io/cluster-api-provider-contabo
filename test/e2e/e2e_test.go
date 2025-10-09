@@ -1,6 +1,3 @@
-//go:build e2e
-// +build e2e
-
 /*
 Copyright 2025.
 
@@ -166,9 +163,8 @@ var _ = Describe("Manager", Ordered, func() {
 		}
 	})
 
-	SetDefaultTimeout(15 * time.Minute)
-	SetDefaultEventuallyTimeout(2 * time.Minute)
-	SetDefaultEventuallyPollingInterval(time.Second)
+	SetDefaultEventuallyTimeout(5 * time.Minute)
+	SetDefaultEventuallyPollingInterval(5 * time.Second)
 
 	Context("Manager", func() {
 		It("should run successfully", func() {
@@ -300,6 +296,9 @@ var _ = Describe("Manager", Ordered, func() {
 		kubectl := func(args ...string) (string, error) {
 			return utils.Run(exec.Command("kubectl", args...))
 		}
+		cntb := func(args ...string) (string, error) {
+			return utils.Run(exec.Command("cntb", args...))
+		}
 
 		// Helper to apply manifests directly via kubectl
 		applyManifest := func(manifest string) {
@@ -351,6 +350,15 @@ var _ = Describe("Manager", Ordered, func() {
 			By("applying cluster and control plane manifests")
 			applyManifest(string(clusterManifest))
 			Expect(err).NotTo(HaveOccurred())
+
+			// Get cluster UUID from ContaboCluster status
+			By("getting cluster UUID from ContaboCluster")
+			var clusterUUID string
+			Eventually(func() string {
+				output, _ := kubectl("get", "contabocluster", "test-cluster", "-n", testNamespace, "-o", "jsonpath={.status.clusterUUID}")
+				clusterUUID = strings.TrimSpace(output)
+				return clusterUUID
+			}, 2*time.Minute, 5*time.Second).ShouldNot(BeEmpty())
 
 			By("verifying cluster resources are created")
 			waitForResource("cluster", "test-cluster", 30*time.Second)
@@ -463,46 +471,95 @@ var _ = Describe("Manager", Ordered, func() {
 				return output
 			}, 20*time.Minute, 10*time.Second).Should(ContainSubstring("True True"))
 
+			// Get the node names
+			By("getting the node names in workload cluster")
+			cmd = exec.Command("kubectl", "--kubeconfig", kubeconfigPath, "get", "nodes", "-o", "jsonpath={.items[*].metadata.name}")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			nodes := strings.Fields(output)
+			Expect(nodes).To(HaveLen(2))
+			workerNodeName := nodes[0]
+			controlPlaneNodeName := nodes[1]
+
 			// Test deletion
 			By("deleting the test cluster and machines")
-			_, err = kubectl("delete", "cluster", "test-cluster", "-n", testNamespace, "--timeout=120s", "--wait=true")
+			_, err = kubectl("delete", "contabomachine", "test-worker", "-n", testNamespace, "--wait=true")
 			Expect(err).NotTo(HaveOccurred())
-			_, err = kubectl("delete", "contabomachine", "test-control-plane", "-n", testNamespace, "--timeout=120s", "--wait=true")
+			_, err = kubectl("delete", "contabomachine", "test-control-plane", "-n", testNamespace, "--wait=true")
 			Expect(err).NotTo(HaveOccurred())
-			_, err = kubectl("delete", "contabomachine", "test-worker", "-n", testNamespace, "--timeout=120s", "--wait=true")
+			_, err = kubectl("delete", "cluster", "test-cluster", "-n", testNamespace, "--wait=true")
 			Expect(err).NotTo(HaveOccurred())
 
 			By("waiting for ContaboMachines to be deleted")
 			Eventually(func() error {
-				_, err := kubectl("get", "contabomachine", "test-control-plane", "-n", testNamespace)
+				_, err := kubectl("get", "contabomachine", "test-worker", "-n", testNamespace)
 				return err
 			}, 2*time.Minute, 5*time.Second).ShouldNot(Succeed())
 			Eventually(func() error {
-				_, err := kubectl("get", "contabomachine", "test-worker", "-n", testNamespace)
+				_, err := kubectl("get", "contabomachine", "test-control-plane", "-n", testNamespace)
 				return err
 			}, 2*time.Minute, 5*time.Second).ShouldNot(Succeed())
 
 			By("checking instance state with cntb CLI")
 			cmd = exec.Command("cntb", "get", "instances", "--output", "json")
-			output, err := utils.Run(cmd)
+			output, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "cntb CLI failed: %s", output)
 
 			type instance struct {
 				ID          int64  `json:"id"`
+				Name        string `json:"name"`
 				DisplayName string `json:"displayName"`
 			}
 			var instances []instance
 			err = json.Unmarshal([]byte(output), &instances)
 			Expect(err).NotTo(HaveOccurred(), "Failed to parse cntb output: %s", output)
 
-			// Both test-control-plane and test-worker should be reset to capc-available
-			foundAvailable := 0
+			// Both test-control-plane and test-worker should be reset
 			for _, inst := range instances {
-				if strings.Contains(inst.DisplayName, "capc-available") {
-					foundAvailable++
+				if inst.Name == controlPlaneNodeName || inst.Name == workerNodeName {
+					Expect(inst.DisplayName).To(Equal(""), "Instance %s should have display name empty", inst.Name)
 				}
 			}
-			Expect(foundAvailable).To(BeNumerically(">=", 2), "Expected at least 2 instances in capc-available state after deletion")
+
+			// Check that private network is deleted
+			By("checking private network with cntb CLI")
+			output, err = cntb("get", "privateNetworks", "--output", "json")
+			Expect(err).NotTo(HaveOccurred(), "cntb CLI failed: %s", output)
+
+			type privateNetwork struct {
+				ID   int64  `json:"id"`
+				Name string `json:"name"`
+			}
+			var privateNetworks []privateNetwork
+			err = json.Unmarshal([]byte(output), &privateNetworks)
+			Expect(err).NotTo(HaveOccurred(), "Failed to parse cntb output: %s", output)
+
+			// Private network name should be [capc] <clusterUUID>
+			expectedNetworkName := fmt.Sprintf("[capc] %s", clusterUUID)
+			for _, network := range privateNetworks {
+				Expect(network.Name).NotTo(Equal(expectedNetworkName),
+					"Private network %s still exists after cluster deletion", expectedNetworkName)
+			}
+
+			// Check that SSH key is deleted
+			By("checking SSH key with cntb CLI")
+			output, err = cntb("get", "secrets", "--output", "json")
+			Expect(err).NotTo(HaveOccurred(), "cntb CLI failed: %s", output)
+
+			type sshKey struct {
+				ID   int64  `json:"id"`
+				Name string `json:"name"`
+			}
+			var sshKeys []sshKey
+			err = json.Unmarshal([]byte(output), &sshKeys)
+			Expect(err).NotTo(HaveOccurred(), "Failed to parse cntb output: %s", output)
+
+			// SSH key name should be [capc] <clusterUUID>
+			expectedKeyName := expectedNetworkName // same naming pattern as network
+			for _, key := range sshKeys {
+				Expect(key.Name).NotTo(Equal(expectedKeyName),
+					"SSH key %s still exists after cluster deletion", expectedKeyName)
+			}
 		})
 	})
 })

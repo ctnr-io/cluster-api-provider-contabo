@@ -73,6 +73,8 @@ type ContaboClusterReconciler struct {
 func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
+	log.Info("Reconciling ContaboCluster", "namespace", req.Namespace, "name", req.Name)
+
 	// Fetch the ContaboCluster instance
 	contaboCluster := &infrastructurev1beta2.ContaboCluster{}
 	if err := r.Get(ctx, req.NamespacedName, contaboCluster); err != nil {
@@ -557,7 +559,23 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 		log.Info("Deleted SSH key", "name", sshKeyName)
 	}
 
-	// Remove our finalizer from the list and update it.
+	// Remove our finalizer from the list and update it if there is no more contabomachines
+	// 1. Get all contabomachines
+	machineList := &infrastructurev1beta2.ContaboMachineList{}
+	if err := r.List(ctx, machineList, client.InNamespace(contaboCluster.Namespace), client.MatchingLabels{
+		clusterv1.ClusterNameLabel: contaboCluster.Name,
+	}); err != nil {
+		return err
+	}
+
+	// 2. If there are still contabomachines, requeue the deletion
+	if len(machineList.Items) > 0 {
+		log.Info("There are still ContaboMachines in the cluster, requeuing deletion", "contaboMachines", len(machineList.Items))
+		return nil
+	}
+
+	// 3. If there are no more contabomachines, remove the finalizer
+	log.Info("No more ContaboMachines in the cluster, removing finalizer")
 	controllerutil.RemoveFinalizer(contaboCluster, infrastructurev1beta2.ClusterFinalizer)
 
 	return nil

@@ -1,6 +1,3 @@
-//go:build e2e
-// +build e2e
-
 /*
 Copyright 2025.
 
@@ -78,13 +75,13 @@ var _ = BeforeSuite(func() {
 
 	// Delete all cluster resources across
 	ParallelRun([]*exec.Cmd{
-		exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true"),
-		exec.Command("kubectl", "delete", "contabomachines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true"),
-		exec.Command("kubectl", "delete", "machines", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true"),
-		exec.Command("kubectl", "delete", "machinesets", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true"),
-		exec.Command("kubectl", "delete", "clusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "contabomachines", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "machines", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "machinesets", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "clusters", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 	})
-	
+
 	var cmd *exec.Cmd
 
 	// Remove clusterctl artifacts if any
@@ -169,7 +166,7 @@ var _ = AfterSuite(func() {
 	// 	exec.Command("kubectl", "delete", "machinesets", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
 	// 	exec.Command("kubectl", "delete", "clusters", "--all", "-n",  "contabo-e2e-test", "--ignore-not-found=true", "--timeout=30s"),
 	// })
-	
+
 	// Wait for reconciliation
 	// time.Sleep(30 * time.Second)
 })

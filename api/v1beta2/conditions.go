@@ -192,6 +192,9 @@ const (
 
 	// InstanceConfigureNodeReason indicates the instance is being configured as a cluster node.
 	InstanceConfigureNodeReason = "InstanceConfigureNode"
+
+	// InstanceBootstrapedReason indicates the instance bootstrap process is complete.
+	InstanceBootstrapedReason = "InstanceBootstraped"
 )
 
 // Machine private network condition reasons.

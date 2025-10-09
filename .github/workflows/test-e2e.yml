@@ -16,6 +16,15 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Go cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
       - name: Install the latest version of kind
         run: |
@@ -25,6 +34,27 @@ jobs:
 
       - name: Verify kind installation
         run: kind version
+
+      - name: Install cntb CLI
+        run: |
+          curl -sL https://github.com/contabo/cntb/releases/download/v1.5.3/cntb_v1.5.3_linux_amd64.tar.gz | tar xz -C /usr/local/bin cntb 
+          chmod +x /usr/local/bin/cntb
+
+      - name: Verify cntb installation
+        run: cntb version
+      
+      - name: Authenticate to contabo
+        env:
+          CONTABO_CLIENT_ID: ${{ secrets.CONTABO_CLIENT_ID }}
+          CONTABO_CLIENT_SECRET: ${{ secrets.CONTABO_CLIENT_SECRET }}
+          CONTABO_API_USER: ${{ secrets.CONTABO_API_USER }}
+          CONTABO_API_PASSWORD: ${{ secrets.CONTABO_API_PASSWORD }}
+        run: |
+          cntb config set-credentials \
+            --oauth2-clientid '${{ secrets.CONTABO_CLIENT_ID }}' \
+            --oauth2-client-secret '${{ secrets.CONTABO_CLIENT_SECRET }}' \
+            --oauth2-user '${{ secrets.CONTABO_API_USER }}' \
+            --oauth2-password '${{ secrets.CONTABO_API_PASSWORD }}'
 
       - name: Running Test e2e
         env:
