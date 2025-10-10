@@ -163,7 +163,7 @@ Manages cluster-wide infrastructure including private networking and control pla
 
 **Key fields:**
 - `spec.controlPlaneEndpoint`: (optional) Kubernetes API server endpoint configuration (host, port)
-- `spec.privateNetworks.region`: Contabo region for the private network (e.g., "EU", "US-central", "US-east", "US-west", "SIN")
+- `spec.privateNetwork.region`: Contabo region for the private network (e.g., "EU", "US-central", "US-east", "US-west", "SIN")
 
 **Sample configuration:**
 ```yaml
@@ -171,7 +171,7 @@ spec:
    controlPlaneEndpoint:
       host: "10.0.0.100"
       port: 6443
-   privateNetworks:
+   privateNetwork:
       region: "EU"
 ```
 
@@ -182,6 +182,7 @@ Manages individual VPS instances.
 **Key fields:**
 - `spec.providerID`: (optional) Unique provider identifier for the instance
 - `spec.instance.productId`: Contabo product ID (instance type, e.g., "V45")
+- `spec.instance.provisioningType`: (optional) Instance provisioning strategy ("ReuseOnly" or "ReuseOrCreate", defaults to "ReuseOnly")
 
 **Sample configuration:**
 ```yaml
@@ -189,6 +190,7 @@ spec:
    providerID: "contabo://123456789"
    instance:
       productId: "V45"
+      provisioningType: "ReuseOrCreate"
 ```
 
 

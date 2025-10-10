@@ -40,11 +40,9 @@ import (
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
@@ -81,11 +79,11 @@ func (r *ContaboMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		WithEventFilter(predicates.ResourceNotPaused(mgr.GetScheme(), ctrl.LoggerFrom(context.TODO()))).
 		// Uncomment to reconcile based on Machine, currently this is not what we need
-		Watches(
-			&clusterv1.Machine{},
-			handler.EnqueueRequestsFromMapFunc(util.MachineToInfrastructureMapFunc(infrastructurev1beta2.GroupVersion.WithKind("ContaboMachine"))),
-			builder.WithPredicates(predicates.ResourceNotPaused(mgr.GetScheme(), ctrl.LoggerFrom(context.TODO()))),
-		).
+		// Watches(
+		// 	&clusterv1.Machine{},
+		// 	handler.EnqueueRequestsFromMapFunc(util.MachineToInfrastructureMapFunc(infrastructurev1beta2.GroupVersion.WithKind("ContaboMachine"))),
+		// 	builder.WithPredicates(predicates.ResourceNotPaused(mgr.GetScheme(), ctrl.LoggerFrom(context.TODO()))),
+		// ).
 		Complete(r)
 }
 
@@ -1346,13 +1344,14 @@ func (r *ContaboMachineReconciler) handleError(ctx context.Context, contaboMachi
 // getKubeconfig retrieves the kubeconfig from the owner Cluster's secret
 // resetInstance prepares an instance for reuse by removing it from any private networks
 func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, instance *infrastructurev1beta2.ContaboInstanceStatus) error {
+	var err error
 	log := logf.FromContext(ctx)
 
 	displayName := ""
 	if instance.ErrorMessage != nil {
 		displayName = Truncate(fmt.Sprintf("[capc] %d %s", instance.InstanceId, *instance.ErrorMessage), 255) // Contabo display name max length is 255 characters
 	}
-	_, err := r.ContaboClient.PatchInstanceWithResponse(ctx, instance.InstanceId, nil, models.PatchInstanceRequest{
+	_, err = r.ContaboClient.PatchInstanceWithResponse(ctx, instance.InstanceId, nil, models.PatchInstanceRequest{
 		DisplayName: &displayName,
 	})
 	if err != nil {
@@ -1369,8 +1368,9 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, instance *
 			if addon.Id == 1477 {
 				// Instance has private networking, need to check which networks
 				for page := int64(1); ; page++ {
+					var privateNetworksResp *contaboclient.RetrievePrivateNetworkListResponse
 					// Retrieve all private networks and check if instance is part of any
-					privateNetworksResp, err := r.ContaboClient.RetrievePrivateNetworkListWithResponse(ctx, &models.RetrievePrivateNetworkListParams{
+					privateNetworksResp, err = r.ContaboClient.RetrievePrivateNetworkListWithResponse(ctx, &models.RetrievePrivateNetworkListParams{
 						Page: &page,
 						Size: ptr.To(int64(100)),
 					})
@@ -1413,7 +1413,7 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, instance *
 			}
 		}
 	}
-	return nil
+	return err
 }
 
 func (r *ContaboMachineReconciler) getKubeconfig(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (string, error) {
