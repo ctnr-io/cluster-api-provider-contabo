@@ -118,7 +118,7 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// Handle deleted clusters
 	if !contaboCluster.DeletionTimestamp.IsZero() {
-		return ctrl.Result{}, r.reconcileDelete(ctx, contaboCluster)
+		return r.reconcileDelete(ctx, contaboCluster)
 	}
 
 	// Handle non-deleted clusters
@@ -457,7 +457,7 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Con
 }
 
 // reconcileDelete may return different ctrl.Result values in future implementations
-func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
+func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	log.Info("Reconciling ContaboCluster delete")
@@ -490,29 +490,20 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 			if len(privateNetwork.Instances) > 0 {
 				for _, instance := range privateNetwork.Instances {
 					if _, err := r.ContaboClient.UnassignInstancePrivateNetwork(ctx, contaboCluster.Status.PrivateNetwork.PrivateNetworkId, instance.InstanceId, nil); err != nil {
-						return r.handleError(
-							ctx,
-							contaboCluster,
-							err,
-							infrastructurev1beta2.ClusterPrivateNetworkReadyCondition,
-							infrastructurev1beta2.ClusterPrivateNetworkFailedReason,
-							"Failed to unassign instances from private network",
-						)
+						log.Error(err, "Failed to unassign instance from private network, continuing with deletion", "instanceID", instance.InstanceId, "privateNetworkId", privateNetwork.PrivateNetworkId)
 					}
 					log.Info("Unassigned instance from private network", "instanceID", instance.InstanceId, "privateNetworkId", privateNetwork.PrivateNetworkId)
+					// Restart instance to apply network changes
+					if _, err := r.ContaboClient.Restart(ctx, instance.InstanceId, nil); err != nil {
+						log.Error(err, "Failed to restart instance after unassigning from private network, continuing with deletion", "instanceID", instance.InstanceId, "privateNetworkId", privateNetwork.PrivateNetworkId, "error")
+					}
+					log.Info("Restarted instance after unassigning from private network", "instanceID", instance.InstanceId, "privateNetworkId", privateNetwork.PrivateNetworkId)
 				}
 			}
 
 			// Delete private network
 			if _, err := r.ContaboClient.DeletePrivateNetwork(ctx, privateNetwork.PrivateNetworkId, nil); err != nil {
-				return r.handleError(
-					ctx,
-					contaboCluster,
-					err,
-					infrastructurev1beta2.ClusterPrivateNetworkReadyCondition,
-					infrastructurev1beta2.ClusterPrivateNetworkFailedReason,
-					"Failed to delete private network",
-				)
+				log.Error(err, "Failed to delete private network, requeuing", "privateNetworkId", privateNetwork.PrivateNetworkId)
 			}
 
 			// Update status to remove private network
@@ -540,14 +531,7 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 		} else {
 			// Delete SSH key
 			if _, err := r.ContaboClient.DeleteSecret(ctx, contaboCluster.Status.SshKey.SecretId, nil); err != nil {
-				return r.handleError(
-					ctx,
-					contaboCluster,
-					err,
-					infrastructurev1beta2.ClusterSshKeyReadyCondition,
-					infrastructurev1beta2.ClusterSshKeyFailedReason,
-					"Failed to delete SSH key",
-				)
+				log.Error(err, "Failed to delete SSH key, requeuing", "sshKeyID", contaboCluster.Status.SshKey.SecretId)
 			}
 		}
 
@@ -565,20 +549,21 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 	if err := r.List(ctx, machineList, client.InNamespace(contaboCluster.Namespace), client.MatchingLabels{
 		clusterv1.ClusterNameLabel: contaboCluster.Name,
 	}); err != nil {
-		return err
+		log.Error(err, "Failed to list ContaboMachines, continuing with deletion")
 	}
 
 	// 2. If there are still contabomachines, requeue the deletion
 	if len(machineList.Items) > 0 {
-		log.Info("There are still ContaboMachines in the cluster, requeuing deletion", "contaboMachines", len(machineList.Items))
-		return nil
+		err := fmt.Errorf("there are still %d ContaboMachines in the cluster", len(machineList.Items))
+		log.Error(err, "There are still ContaboMachines in the cluster, requeuing deletion", "contaboMachines", len(machineList.Items))
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 	}
 
 	// 3. If there are no more contabomachines, remove the finalizer
 	log.Info("No more ContaboMachines in the cluster, removing finalizer")
 	controllerutil.RemoveFinalizer(contaboCluster, infrastructurev1beta2.ClusterFinalizer)
 
-	return nil
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

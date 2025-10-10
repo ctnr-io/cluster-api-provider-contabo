@@ -91,7 +91,7 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet clusterctl cilium ## Run the e2e tests. Expected an isolated environment using Kind.
-	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) CLUSTERCTL=$(CLUSTERCTL) go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 20m
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) CLUSTERCTL=$(CLUSTERCTL) dotenvx run -- go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 20m
 # 	cleanup-test-e2e
 
 .PHONY: test-e2e.re

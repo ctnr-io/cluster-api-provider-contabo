@@ -1,0 +1,5 @@
+--container-architecture=linux/amd64
+--platform=ubuntu-latest=catthehacker/ubuntu:full-latest
+--use-new-action-cache
+--var-file=.env
+--var ACT=true

@@ -2,7 +2,7 @@ name: E2E Tests
 
 on:
   push:
-  pull_request:
+    branches: [ main ]
 
 jobs:
   test-e2e:
@@ -25,6 +25,20 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
+            
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-transport-https ca-certificates curl build-essential
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          install -m 0755 kubectl /usr/local/bin/kubectl
+
+      - name: Install dotenvx
+        run: |
+          curl -sfS https://dotenvx.sh | sh
 
       - name: Install the latest version of kind
         run: |
@@ -63,7 +77,6 @@ jobs:
           CONTABO_API_USER: ${{ secrets.CONTABO_API_USER }}
           CONTABO_API_PASSWORD: ${{ secrets.CONTABO_API_PASSWORD }}
         run: |
-          go mod tidy
-          ./test/setup-e2e.sh
-          make test-e2e
+          # Run tests with debug output
+          make test-e2e GINKGO_ARGS="-v --trace" IMG=cluster-api-provider-contabo:latest
 

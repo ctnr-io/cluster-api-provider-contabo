@@ -452,11 +452,11 @@ var _ = Describe("Manager", Ordered, func() {
 					return ""
 				}
 				return output
-			}, 20*time.Minute, 10*time.Second).Should(ContainSubstring("node-role.kubernetes.io/control-plane"))
+			}).Should(ContainSubstring("node-role.kubernetes.io/control-plane"))
 
 			// Install Cilium CNI
 			By("installing Cilium CNI in workload cluster")
-			cmd := exec.Command("cilium", "install", "--version", "1.18.2", "--kubeconfig", kubeconfigPath)
+			cmd := exec.Command("./bin/cilium", "install", "--version", "1.18.2", "--kubeconfig", kubeconfigPath)
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -469,7 +469,7 @@ var _ = Describe("Manager", Ordered, func() {
 					return ""
 				}
 				return output
-			}, 20*time.Minute, 10*time.Second).Should(ContainSubstring("True True"))
+			}).Should(ContainSubstring("True True"))
 
 			// Get the node names
 			By("getting the node names in workload cluster")

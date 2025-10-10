@@ -675,24 +675,24 @@ func (r *ContaboMachineReconciler) reconcilePrivateNetworkAssignment(ctx context
 			)
 		}
 
-		// Reinstalling instance to be sure there are no issues with private network
-		log.Info("Reinstalling instance to be sure there are no issues with private network",
-			"instanceID", contaboMachine.Status.Instance.InstanceId)
-		_, err = r.ContaboClient.ReinstallInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
-			SshKeys: &[]int64{contaboCluster.Status.SshKey.SecretId},
-			ImageId: contaboMachine.Status.Instance.ImageId,
-		})
-		if err != nil {
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.handleError(
-				ctx,
-				contaboMachine,
-				err,
-				infrastructurev1beta2.InstanceFailedReason,
-				"Failed to reinstall instance after private network assignment",
-			)
-		}
-		// Wait a bit before checking the instance status again
-		time.Sleep(10 * time.Second)
+		// // Reinstalling instance to be sure there are no issues with private network
+		// log.Info("Reinstalling instance to be sure there are no issues with private network",
+		// 	"instanceID", contaboMachine.Status.Instance.InstanceId)
+		// _, err = r.ContaboClient.ReinstallInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
+		// 	SshKeys: &[]int64{contaboCluster.Status.SshKey.SecretId},
+		// 	ImageId: contaboMachine.Status.Instance.ImageId,
+		// })
+		// if err != nil {
+		// 	return ctrl.Result{RequeueAfter: 30 * time.Second}, r.handleError(
+		// 		ctx,
+		// 		contaboMachine,
+		// 		err,
+		// 		infrastructurev1beta2.InstanceFailedReason,
+		// 		"Failed to reinstall instance after private network assignment",
+		// 	)
+		// }
+		// // Wait a bit before checking the instance status again
+		// time.Sleep(10 * time.Second)
 
 		// Requeue to wait for the instance to be fully restarted
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
@@ -1361,6 +1361,7 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, instance *
 			"newDisplayName", displayName)
 	}
 
+	// TODO: code is ugly, needs refactoring
 	// Check if instance has any private networks assigned
 	if len(instance.AddOns) > 0 {
 		for _, addon := range instance.AddOns {
@@ -1389,11 +1390,19 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, instance *
 									log.Info("Successfully unassigned private network from instance",
 										"instanceID", instance.InstanceId,
 										"networkID", network.PrivateNetworkId)
+									// Restart
+									_, err = r.ContaboClient.Restart(ctx, instance.InstanceId, nil)
+									if err != nil {
+										log.Error(err, "Failed to reboot instance after unassigning private network",
+											"instanceID", instance.InstanceId)
+									} else {
+										log.Info("Rebooted instance after unassigning private network",
+											"instanceID", instance.InstanceId)
+									}
 								} else {
 									log.Error(err, "Failed to unassign private network from instance",
 										"instanceID", instance.InstanceId,
 										"networkID", network.PrivateNetworkId)
-									return err
 								}
 								break
 							}
