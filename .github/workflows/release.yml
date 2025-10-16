@@ -1,30 +1,32 @@
-name: Release Docker Image
+name: Release
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
-  pull_request:
-    branches:
-      - main
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build:
-    name: Build and Push
+  release:
+    name: Create Release
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
-
+    
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -33,12 +35,15 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Extract Docker metadata
         id: meta
@@ -46,20 +51,55 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=sha-
-            type=ref,event=pr
-            type=ref,event=branch
 
-      - name: Build and push
+      - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build release artifacts
+        env:
+          IMG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
+        run: |
+          mkdir -p out
+          
+          # Copy metadata
+          cp metadata.yaml out/metadata.yaml
+          
+          # Generate infrastructure components
+          make release-manifests IMG=${IMG}
+          
+          # Copy cluster templates
+          cp config/samples/cluster-template.yaml out/cluster-template.yaml
+          cp config/samples/cluster-template-ha.yaml out/cluster-template-ha.yaml 2>/dev/null || echo "No HA template found"
+          cp config/samples/cluster-template-autoscaler.yaml out/cluster-template-autoscaler.yaml 2>/dev/null || echo "No autoscaler template found"
+
+      - name: Build Changelog
+        id: github_release
+        uses: mikepenz/release-changelog-builder-action@v4
+        with:
+          configuration: ".github/changelog-config.json"
+          failOnError: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body: ${{ steps.github_release.outputs.changelog }}
+          files: |
+            out/metadata.yaml
+            out/infrastructure-components.yaml
+            out/cluster-template.yaml
+            out/cluster-template-ha.yaml
+            out/cluster-template-autoscaler.yaml
+          draft: false
+          prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}

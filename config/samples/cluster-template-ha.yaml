@@ -31,7 +31,7 @@ kind: KubeadmControlPlane
 metadata:
   name: "${CLUSTER_NAME}-control-plane"
 spec:
-  replicas: ${CONTROL_PLANE_MACHINE_COUNT:=1}
+  replicas: ${CONTROL_PLANE_MACHINE_COUNT:=3}
   version: ${KUBERNETES_VERSION}
   machineTemplate:
     infrastructureRef:
@@ -74,7 +74,7 @@ metadata:
   name: "${CLUSTER_NAME}-md-0"
 spec:
   clusterName: "${CLUSTER_NAME}"
-  replicas: ${WORKER_MACHINE_COUNT:=2}
+  replicas: ${WORKER_MACHINE_COUNT:=3}
   selector:
     matchLabels:
       cluster.x-k8s.io/cluster-name: ${CLUSTER_NAME}
@@ -120,3 +120,23 @@ spec:
           name: '{{ ds.meta_data.hostname }}'
           kubeletExtraArgs:
             cloud-provider: external
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: MachineHealthCheck
+metadata:
+  name: "${CLUSTER_NAME}-worker-health-check"
+spec:
+  clusterName: "${CLUSTER_NAME}"
+  maxUnhealthy: 40%
+  nodeStartupTimeout: 20m
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: ${CLUSTER_NAME}
+      pool: worker-pool-0
+  unhealthyConditions:
+    - type: Ready
+      status: Unknown
+      timeout: 5m
+    - type: Ready
+      status: "False"
+      timeout: 5m

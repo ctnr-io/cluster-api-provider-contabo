@@ -31,7 +31,7 @@ kind: KubeadmControlPlane
 metadata:
   name: "${CLUSTER_NAME}-control-plane"
 spec:
-  replicas: ${CONTROL_PLANE_MACHINE_COUNT:=1}
+  replicas: ${CONTROL_PLANE_MACHINE_COUNT:=3}
   version: ${KUBERNETES_VERSION}
   machineTemplate:
     infrastructureRef:
@@ -72,9 +72,12 @@ apiVersion: cluster.x-k8s.io/v1beta1
 kind: MachineDeployment
 metadata:
   name: "${CLUSTER_NAME}-md-0"
+  annotations:
+    cluster.x-k8s.io/cluster-api-autoscaler-node-group-min-size: "${WORKER_MACHINE_COUNT_MIN:=1}"
+    cluster.x-k8s.io/cluster-api-autoscaler-node-group-max-size: "${WORKER_MACHINE_COUNT_MAX:=10}"
 spec:
   clusterName: "${CLUSTER_NAME}"
-  replicas: ${WORKER_MACHINE_COUNT:=2}
+  replicas: ${WORKER_MACHINE_COUNT:=3}
   selector:
     matchLabels:
       cluster.x-k8s.io/cluster-name: ${CLUSTER_NAME}
@@ -120,3 +123,92 @@ spec:
           name: '{{ ds.meta_data.hostname }}'
           kubeletExtraArgs:
             cloud-provider: external
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: MachineHealthCheck
+metadata:
+  name: "${CLUSTER_NAME}-worker-health-check"
+spec:
+  clusterName: "${CLUSTER_NAME}"
+  maxUnhealthy: 40%
+  nodeStartupTimeout: 10m
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: ${CLUSTER_NAME}
+      pool: worker-pool-0
+  unhealthyConditions:
+    - type: Ready
+      status: Unknown
+      timeout: 5m
+    - type: Ready
+      status: "False"
+      timeout: 5m
+---
+# Cluster Autoscaler Helm Addon
+# Automatically installed via CAPI Helm addon provider
+apiVersion: addons.cluster.x-k8s.io/v1beta1
+kind: HelmChartProxy
+metadata:
+  name: cluster-autoscaler
+spec:
+  clusterSelector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: ${CLUSTER_NAME}
+  repoURL: https://kubernetes.github.io/autoscaler
+  chartName: cluster-autoscaler
+  version: ${CLUSTER_AUTOSCALER_VERSION:=9.29.3}
+  namespace: kube-system
+  releaseName: cluster-autoscaler
+  valuesTemplate: |
+    autoDiscovery:
+      clusterName: {{ .Cluster.metadata.name }}
+    
+    cloudProvider: clusterapi
+    clusterAPIMode: kubeconfig-kubeconfig
+    clusterAPIKubeconfigSecret: cluster-autoscaler-kubeconfig
+    clusterAPICloudConfigPath: /etc/kubernetes/mgmt-kubeconfig
+    
+    extraArgs:
+      balance-similar-node-groups: true
+      scale-down-enabled: true
+      scale-down-delay-after-add: 1m
+      scale-down-unneeded-time: 1m
+      scale-down-utilization-threshold: 0.5
+      skip-nodes-with-local-storage: false
+      skip-nodes-with-system-pods: false
+      max-node-provision-time: 15m
+      v: 4
+    
+    resources:
+      limits:
+        cpu: 100m
+        memory: 300Mi
+      requests:
+        cpu: 100m
+        memory: 300Mi
+    
+    rbac:
+      create: true
+      serviceAccount:
+        create: true
+        name: cluster-autoscaler
+---
+# Secret containing management cluster kubeconfig
+# This will be created by CAPI Helm addon and contains credentials to scale MachineDeployments
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-autoscaler-kubeconfig
+  namespace: ${CLUSTER_NAMESPACE:=default}
+type: addons.cluster.x-k8s.io/resource-set
+stringData:
+  value: |
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: cluster-autoscaler-kubeconfig
+      namespace: kube-system
+    type: Opaque
+    stringData:
+      kubeconfig: |
+        {{ .BootstrapKubeconfig | indent 8 }}

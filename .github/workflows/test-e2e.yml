@@ -79,4 +79,3 @@ jobs:
         run: |
           # Run tests with debug output
           make test-e2e GINKGO_ARGS="-v --trace" IMG=cluster-api-provider-contabo:latest
-

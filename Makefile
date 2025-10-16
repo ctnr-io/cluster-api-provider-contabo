@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= cluster-api-provider-contabo:latest
+IMG ?= ghcr.io/ctnr-io/cluster-api-provider-contabo:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -176,6 +176,12 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	mkdir -p dist
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > dist/install.yaml
+
+.PHONY: release-manifests
+release-manifests: manifests generate kustomize ## Generate release manifests for CAPI provider.
+	@mkdir -p out
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(KUSTOMIZE) build config/default > out/infrastructure-components.yaml
 
 ##@ Deployment
 

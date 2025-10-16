@@ -137,6 +137,7 @@ func (r *ContaboMachineReconciler) createNewInstance(
 			AddOns: &models.CreateInstanceAddons{
 				PrivateNetworking: ptr.To(map[string]interface{}{}),
 			},
+			DisplayName: ptr.To(FormatDisplayName(contaboMachine, contaboCluster)),
 		})
 		if err != nil || instanceCreateResp.StatusCode() < 200 || instanceCreateResp.StatusCode() >= 300 {
 			log.Error(err, "Failed to create instance in Contabo API",

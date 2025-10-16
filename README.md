@@ -54,12 +54,23 @@ The provider includes:
    export WORKER_MACHINE_COUNT=2
    ```
 
-3. **Initialize the management cluster**
+3. **Configure clusterctl provider**
+   ```sh
+   mkdir -p ~/.cluster-api
+   cat << EOF > ~/.cluster-api/clusterctl.yaml
+   providers:
+     - name: "contabo"
+       url: "https://github.com/ctnr-io/cluster-api-provider-contabo/releases/latest/infrastructure-components.yaml"
+       type: "InfrastructureProvider"
+   EOF
+   ```
+
+4. **Initialize the management cluster**
    ```sh
    clusterctl init --infrastructure contabo
    ```
 
-4. **Generate cluster configuration**
+5. **Generate cluster configuration**
    ```sh
    clusterctl generate cluster $CLUSTER_NAME \
      --infrastructure contabo \
@@ -69,12 +80,12 @@ The provider includes:
      > $CLUSTER_NAME.yaml
    ```
 
-5. **Create the cluster**
+6. **Create the cluster**
    ```sh
    kubectl apply -f $CLUSTER_NAME.yaml
    ```
 
-6. **Get the kubeconfig for the new cluster**
+7. **Get the kubeconfig for the new cluster**
    ```sh
    clusterctl get kubeconfig $CLUSTER_NAME > $CLUSTER_NAME.kubeconfig
    ```
@@ -319,6 +330,66 @@ if you create webhooks, you need to use the above command with
 the '--force' flag and manually ensure that any custom configuration
 previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
 is manually re-applied afterwards.
+
+## Creating a Release
+
+This provider follows the Cluster API provider pattern for releases. To create a new release:
+
+### Release Process
+
+1. **Tag the release:**
+   ```sh
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+
+2. **GitHub Actions will automatically:**
+   - Build and push the Docker image to GHCR
+   - Generate provider manifests (`infrastructure-components.yaml`)
+   - Create cluster templates
+   - Create a GitHub Release with all artifacts
+
+3. **Release artifacts include:**
+   - `metadata.yaml`: Provider metadata for clusterctl
+   - `infrastructure-components.yaml`: Complete provider installation manifest
+   - `cluster-template.yaml`: Basic single-node cluster template
+   - `cluster-template-ha.yaml`: High-availability cluster template
+
+### Using a Release
+
+Users can install the provider using clusterctl:
+
+```sh
+# Set required environment variables
+export CONTABO_CLIENT_ID="your-oauth2-client-id"
+export CONTABO_CLIENT_SECRET="your-oauth2-client-secret"
+export CONTABO_API_USER="your-contabo-username"
+export CONTABO_API_PASSWORD="your-contabo-password"
+
+# Initialize the provider
+clusterctl init --infrastructure contabo:v0.1.0
+
+# Generate and create a cluster
+clusterctl generate cluster my-cluster \
+  --infrastructure contabo:v0.1.0 \
+  --kubernetes-version v1.28.0 \
+  --control-plane-machine-count 1 \
+  --worker-machine-count 2 > my-cluster.yaml
+
+kubectl apply -f my-cluster.yaml
+```
+
+### Local Release Testing
+
+To test the release process locally:
+
+```sh
+# Build release manifests
+make release-manifests IMG=ghcr.io/ctnr-io/cluster-api-provider-contabo:v0.1.0
+
+# Verify the generated files in the out/ directory
+ls -la out/
+```
 
 ## Contributing
 

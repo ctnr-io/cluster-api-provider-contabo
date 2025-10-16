@@ -103,7 +103,7 @@ spec:
           status:
             description: status defines the observed state of ContaboCluster
             properties:
-              clusterID:
+              clusterUUID:
                 description: ClusterUUID is the identifier of the Contabo cluster.
                 type: string
               conditions:
@@ -190,6 +190,15 @@ spec:
                   - name
                   type: object
                 type: array
+              initialization:
+                description: Initialization
+                properties:
+                  provisioned:
+                    description: Provisioned indicates if the initialization is complete
+                    type: boolean
+                required:
+                - provisioned
+                type: object
               privateNetworks:
                 description: PrivateNetwork contains the discovered information about
                   private networks
@@ -457,6 +466,10 @@ spec:
                   productId:
                     description: ProductID is the Contabo product ID (instance type)
                     type: string
+                  provisioningType:
+                    description: Field to know if should create a new instance or
+                      reuse an existing one
+                    type: string
                 required:
                 - productId
                 type: object
@@ -496,6 +509,10 @@ spec:
                   - type
                   type: object
                 type: array
+              available:
+                description: Available is true when the provider resource is available
+                  for use (provisioned and bootstraped).
+                type: boolean
               conditions:
                 description: Conditions defines current service state of the ContaboMachine.
                 items:
@@ -591,6 +608,19 @@ spec:
                   can be added as events to the Machine object and/or logged in the
                   controller's output.
                 type: string
+              initialization:
+                description: Initialization, needed to be able to bootstrap the machine
+                properties:
+                  errorMessage:
+                    description: ErrorMessage provides details in case of initialization
+                      failure
+                    type: string
+                  provisioned:
+                    description: Provisioned indicates if the initialization is complete
+                    type: boolean
+                required:
+                - provisioned
+                type: object
               instance:
                 description: Instance is the current state of the Contabo instance.
                 properties:
@@ -782,7 +812,6 @@ spec:
                 required:
                 - addOns
                 - additionalIps
-                - cancelDate
                 - cpuCores
                 - createdDate
                 - customerId
@@ -809,7 +838,8 @@ spec:
                 - vHostNumber
                 type: object
               ready:
-                description: Ready is true when the provider resource is ready.
+                description: Ready is true when the provider resource is ready (provisioned
+                  not bootstraped). Needed by CABPK and CAPI.
                 type: boolean
             type: object
         required:
@@ -883,6 +913,10 @@ spec:
                           productId:
                             description: ProductID is the Contabo product ID (instance
                               type)
+                            type: string
+                          provisioningType:
+                            description: Field to know if should create a new instance
+                              or reuse an existing one
                             type: string
                         required:
                         - productId
@@ -1181,8 +1215,10 @@ rules:
   - secrets
   verbs:
   - create
+  - delete
   - get
   - list
+  - update
   - watch
 - apiGroups:
   - cluster.x-k8s.io
@@ -1389,7 +1425,7 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        image: controller:latest
+        image: ghcr.io/ctnr-io/cluster-api-provider-contabo:latest
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
