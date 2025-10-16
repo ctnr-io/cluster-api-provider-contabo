@@ -6,4 +6,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: cluster-api-provider-contabo
-  newTag: e2e-test
+  newTag: latest

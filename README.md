@@ -81,6 +81,27 @@ The provider includes:
 
 ### Development Setup
 
+### Container Images
+
+The provider is available as a Docker image from GitHub Container Registry:
+
+```sh
+# Pull the latest version
+docker pull ghcr.io/ctnr-io/cluster-api-provider-contabo:latest
+
+# Pull a specific version
+docker pull ghcr.io/ctnr-io/cluster-api-provider-contabo:1.0.0
+
+# Pull a specific commit
+docker pull ghcr.io/ctnr-io/cluster-api-provider-contabo:sha-abc123
+```
+
+Available image tags:
+- `latest`: Latest build from the main branch
+- `x.y.z`: Release versions (e.g., `1.0.0`)
+- `x.y`: Minor version tags (e.g., `1.0`)
+- `sha-*`: Specific commit builds
+
 ### To Deploy on the cluster
 
 **Set up your Contabo OAuth2 credentials:**
@@ -91,15 +112,17 @@ export CONTABO_API_USER="your-contabo-username"
 export CONTABO_API_PASSWORD="your-contabo-password"
 ```
 
-**Build and push your image to the location specified by `IMG`:**
+**Deploy using the official image:**
 
 ```sh
-make docker-build docker-push IMG=<some-registry>/cluster-api-provider-contabo:tag
+make deploy IMG=ghcr.io/ctnr-io/cluster-api-provider-contabo:latest
 ```
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+For development, you can build and push your own version:
+
+```sh
+make docker-build docker-push IMG=ghcr.io/ctnr-io/cluster-api-provider-contabo:dev
+```
 
 **Install the CRDs into the cluster:**
 
