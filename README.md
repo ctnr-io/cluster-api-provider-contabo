@@ -269,20 +269,6 @@ The authentication flow automatically obtains access tokens from:
 https://auth.contabo.com/auth/realms/contabo/protocol/openid-connect/token
 ```
 
-### Available Regions
-- `EU`: European data centers
-- `US-central`: US Central data centers
-- `US-east`: US East data centers
-- `US-west`: US West data centers
-- `SIN`: Singapore data centers
-
-### Available Instance Types
-- `S`: Small VPS
-- `M`: Medium VPS  
-- `L`: Large VPS
-- `XL`: Extra Large VPS
-- `XXL`: Extra Extra Large VPS
-
 See the Contabo documentation for current specifications and pricing.
 
 ## Project Distribution
