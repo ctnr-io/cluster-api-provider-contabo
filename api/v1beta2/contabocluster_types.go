@@ -31,7 +31,7 @@ type ContaboClusterSpec struct {
 	ControlPlaneEndpoint *clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty"`
 
 	// PrivateNetwork specifies the private network configuration for the cluster.
-	PrivateNetwork ContaboPrivateNetworkSpec `json:"privateNetworks"`
+	PrivateNetwork ContaboPrivateNetworkSpec `json:"privateNetwork"`
 }
 
 // ContaboClusterStatus defines the observed state of ContaboCluster.
@@ -46,7 +46,7 @@ type ContaboClusterStatus struct {
 
 	// PrivateNetwork contains the discovered information about private networks
 	// +optional
-	PrivateNetwork *ContaboPrivateNetworkStatus `json:"privateNetworks,omitempty"`
+	PrivateNetwork *ContaboPrivateNetworkStatus `json:"privateNetwork,omitempty"`
 
 	// SshKey contains the references to secrets used by the machine.
 	// +optional
@@ -103,7 +103,7 @@ type ContaboClusterInitializationStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Cluster",type="string",JSONPath=".metadata.labels.cluster\\.x-k8s\\.io/cluster-name",description="Cluster to which this ContaboCluster belongs"
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.ready",description="Cluster infrastructure is ready"
-// +kubebuilder:printcolumn:name="Private Networks",type="string",JSONPath=".status.privateNetworks[].name",description="Private Networks"
+// +kubebuilder:printcolumn:name="Private Networks",type="string",JSONPath=".status.privateNetwork.name",description="Private Networks"
 // +kubebuilder:printcolumn:name="Endpoint",type="string",JSONPath=".spec.controlPlaneEndpoint.host",description="API Endpoint",priority=1
 // +kubebuilder:resource:path=contaboclusters,scope=Namespaced,categories=cluster-api
 // +kubebuilder:storageversion

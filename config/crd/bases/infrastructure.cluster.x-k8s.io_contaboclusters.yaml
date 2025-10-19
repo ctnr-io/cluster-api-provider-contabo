@@ -26,7 +26,7 @@ spec:
       name: Ready
       type: string
     - description: Private Networks
-      jsonPath: .status.privateNetworks[].name
+      jsonPath: .status.privateNetwork.name
       name: Private Networks
       type: string
     - description: API Endpoint
@@ -76,7 +76,7 @@ spec:
                     minimum: 1
                     type: integer
                 type: object
-              privateNetworks:
+              privateNetwork:
                 description: PrivateNetwork specifies the private network configuration
                   for the cluster.
                 properties:
@@ -88,7 +88,7 @@ spec:
                 - region
                 type: object
             required:
-            - privateNetworks
+            - privateNetwork
             type: object
           status:
             description: status defines the observed state of ContaboCluster
@@ -189,7 +189,7 @@ spec:
                 required:
                 - provisioned
                 type: object
-              privateNetworks:
+              privateNetwork:
                 description: PrivateNetwork contains the discovered information about
                   private networks
                 properties:

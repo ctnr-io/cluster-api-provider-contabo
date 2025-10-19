@@ -11,5 +11,5 @@ spec:
     host: "10.0.0.100"
     port: 6443
   network:
-    privateNetworks:
+    privateNetwork:
     - name: "default-network"
