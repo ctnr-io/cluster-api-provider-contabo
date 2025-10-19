@@ -28,3 +28,6 @@ go.work
 
 # Dotenv
 .env
+
+# Test Kubeconfig files
+test/fixtures/kubeconfig.yaml
