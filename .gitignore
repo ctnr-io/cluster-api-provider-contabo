@@ -31,3 +31,5 @@ go.work
 
 # Test Kubeconfig files
 test/fixtures/kubeconfig.yaml
+
+out/
