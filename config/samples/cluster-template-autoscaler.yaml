@@ -31,7 +31,7 @@ kind: KubeadmControlPlane
 metadata:
   name: "${CLUSTER_NAME}-control-plane"
 spec:
-  replicas: !!int ${CONTROL_PLANE_MACHINE_COUNT:=3}
+  replicas: ${CONTROL_PLANE_MACHINE_COUNT:=3}
   version: ${KUBERNETES_VERSION}
   machineTemplate:
     infrastructureRef:
@@ -73,11 +73,11 @@ kind: MachineDeployment
 metadata:
   name: "${CLUSTER_NAME}-md-0"
   annotations:
-    cluster.x-k8s.io/cluster-api-autoscaler-node-group-min-size: "${WORKER_MACHINE_COUNT_MIN:=1}"
-    cluster.x-k8s.io/cluster-api-autoscaler-node-group-max-size: "${WORKER_MACHINE_COUNT_MAX:=10}"
+    cluster.x-k8s.io/cluster-api-autoscaler-node-group-min-size: \"${WORKER_MACHINE_COUNT_MIN:=1}\"
+    cluster.x-k8s.io/cluster-api-autoscaler-node-group-max-size: \"${WORKER_MACHINE_COUNT_MAX:=10}\"
 spec:
   clusterName: "${CLUSTER_NAME}"
-  replicas: !!int ${WORKER_MACHINE_COUNT:=3}
+  replicas: ${WORKER_MACHINE_COUNT:=3}
   selector:
     matchLabels:
       cluster.x-k8s.io/cluster-name: ${CLUSTER_NAME}
