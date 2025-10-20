@@ -75,11 +75,16 @@ var _ = BeforeSuite(func() {
 
 	// Delete all cluster resources across
 	ParallelRun([]*exec.Cmd{
+		exec.Command("kubectl", "delete", "clusters", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "kubeadmcontrolplanes", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "machinedeployments", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 		exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 		exec.Command("kubectl", "delete", "contabomachines", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "contabomachinetemplates", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 		exec.Command("kubectl", "delete", "machines", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 		exec.Command("kubectl", "delete", "machinesets", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
-		exec.Command("kubectl", "delete", "clusters", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "kubeadmconfigs", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "kubeadmconfigtemplates", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 	})
 
 	var cmd *exec.Cmd

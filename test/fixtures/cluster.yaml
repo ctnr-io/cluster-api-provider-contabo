@@ -14,87 +14,111 @@ metadata:
   name: test-cluster
   namespace: contabo-e2e-test
 spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+      - 192.168.0.0/16
+    services:
+      cidrBlocks:
+      - 10.96.0.0/12
   infrastructureRef:
     apiGroup: infrastructure.cluster.x-k8s.io
     kind: ContaboCluster
     name: test-cluster
-
-
----
-kind: KubeadmConfig
-apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
-metadata:
-  name: test-control-plane
-  namespace: contabo-e2e-test
----
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
-kind: ContaboMachine
-metadata:
-  name: test-control-plane
-  namespace: contabo-e2e-test
-spec:
-  instance:
-    productId: V76
-    provisioningType: ReuseOnly
----
-apiVersion: cluster.x-k8s.io/v1beta2
-kind: Machine
-metadata:
-  name: test-control-plane
-  namespace: contabo-e2e-test
-  labels:
-    cluster.x-k8s.io/cluster-name: test-cluster
-    cluster.x-k8s.io/control-plane: "true"
-    set: control-plane
-spec:
-  clusterName: test-cluster
-  infrastructureRef:
-    apiGroup: infrastructure.cluster.x-k8s.io
-    kind: ContaboMachine
+  controlPlaneRef:
+    apiGroup: controlplane.cluster.x-k8s.io
+    kind: KubeadmControlPlane
     name: test-control-plane
-  bootstrap:
-    configRef:
-      apiGroup: bootstrap.cluster.x-k8s.io
-      kind: KubeadmConfig
-      name: test-control-plane
-  version: v1.34.1
-
-
-
----
-apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
-kind: KubeadmConfig
-metadata:
-  name: test-worker
-  namespace: contabo-e2e-test
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
-kind: ContaboMachine
+kind: ContaboMachineTemplate
+metadata:
+  name: test-control-plane
+  namespace: contabo-e2e-test
+spec:
+  template:
+    spec:
+      instance:
+        productId: V76
+        provisioningType: ReuseOnly
+---
+apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+kind: KubeadmControlPlane
+metadata:
+  name: test-control-plane
+  namespace: contabo-e2e-test
+spec:
+  replicas: 1
+  version: v1.34.1
+  machineTemplate:
+    infrastructureRef:
+      kind: ContaboMachineTemplate
+      apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+      name: test-control-plane
+  # kubeadmConfigSpec:
+  #   initConfiguration:
+  #     nodeRegistration:
+  #       kubeletExtraArgs:
+  #         provider-id: "contabo://{{ ds.meta_data.instance_id }}"
+  #   joinConfiguration:
+  #     nodeRegistration:
+  #       kubeletExtraArgs:
+  #         provider-id: "contabo://{{ ds.meta_data.instance_id }}"
+  #   clusterConfiguration:
+  #     apiServer:
+  #       certSANs:
+  #       - localhost
+  #       - 127.0.0.1
+  #     controllerManager:
+  #       extraArgs:
+  #         enable-hostpath-provisioner: "true"
+
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: ContaboMachineTemplate
 metadata:
   name: test-worker
   namespace: contabo-e2e-test
 spec:
-  instance:
-    productId: V78
-    provisioningType: ReuseOnly
+  template:
+    spec:
+      instance:
+        productId: V78
+        provisioningType: ReuseOnly
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+kind: KubeadmConfigTemplate
+metadata:
+  name: test-worker
+  namespace: contabo-e2e-test
+
 ---
 apiVersion: cluster.x-k8s.io/v1beta2
-kind: Machine
+kind: MachineDeployment
 metadata:
   name: test-worker
   namespace: contabo-e2e-test
-  labels:
-    cluster.x-k8s.io/cluster-name: test-cluster
-    set: worker
 spec:
   clusterName: test-cluster
-  infrastructureRef:
-    apiGroup: infrastructure.cluster.x-k8s.io
-    kind: ContaboMachine
-    name: test-worker
-  bootstrap:
-    configRef:
-      apiGroup: bootstrap.cluster.x-k8s.io
-      kind: KubeadmConfig
-      name: test-worker
-  version: v1.34.1
+  replicas: 1
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: test-cluster
+      cluster.x-k8s.io/deployment-name: test-worker
+  template:
+    metadata:
+      labels:
+        cluster.x-k8s.io/cluster-name: test-cluster
+        cluster.x-k8s.io/deployment-name: test-worker
+    spec:
+      clusterName: test-cluster
+      version: v1.34.1
+      bootstrap:
+        configRef:
+          apiGroup: bootstrap.cluster.x-k8s.io
+          kind: KubeadmConfigTemplate
+          name: test-worker
+      infrastructureRef:
+        apiGroup: infrastructure.cluster.x-k8s.io
+        kind: ContaboMachineTemplate
+        name: test-worker

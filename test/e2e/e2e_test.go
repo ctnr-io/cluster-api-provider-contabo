@@ -108,11 +108,16 @@ var _ = Describe("Manager", Ordered, func() {
 
 		// Delete all cluster resources
 		ParallelRun([]*exec.Cmd{
+			exec.Command("kubectl", "delete", "clusters", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+			exec.Command("kubectl", "delete", "kubeadmcontrolplanes", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+			exec.Command("kubectl", "delete", "machinedeployments", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 			exec.Command("kubectl", "delete", "contaboclusters", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 			exec.Command("kubectl", "delete", "contabomachines", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+			exec.Command("kubectl", "delete", "contabomachinetemplates", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 			exec.Command("kubectl", "delete", "machines", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 			exec.Command("kubectl", "delete", "machinesets", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
-			exec.Command("kubectl", "delete", "clusters", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+			exec.Command("kubectl", "delete", "kubeadmconfigs", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+			exec.Command("kubectl", "delete", "kubeadmconfigtemplates", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 		})
 
 		// Wait for reconciliation
@@ -363,16 +368,45 @@ var _ = Describe("Manager", Ordered, func() {
 			By("verifying cluster resources are created")
 			waitForResource("cluster", "test-cluster", 30*time.Second)
 			waitForResource("contabocluster", "test-cluster", 30*time.Second)
-			waitForResource("machine", "test-control-plane", 30*time.Second)
-			waitForResource("contabomachine", "test-control-plane", 30*time.Second)
-			waitForResource("machine", "test-worker", 30*time.Second)
-			waitForResource("contabomachine", "test-worker", 30*time.Second)
+			waitForResource("kubeadmcontrolplane", "test-control-plane", 30*time.Second)
+			waitForResource("machinedeployment", "test-worker", 30*time.Second)
+
+			By("waiting for KubeadmControlPlane to create control plane machines")
+			var controlPlaneMachineName string
+			Eventually(func() string {
+				output, _ := kubectl("get", "machines", "-n", testNamespace, "-l", "cluster.x-k8s.io/control-plane=true", "-o", "jsonpath={.items[0].metadata.name}")
+				controlPlaneMachineName = strings.TrimSpace(output)
+				return controlPlaneMachineName
+			}, 2*time.Minute, 5*time.Second).ShouldNot(BeEmpty())
+
+			By("waiting for MachineDeployment to create worker machines")
+			var workerMachineName string
+			Eventually(func() string {
+				output, _ := kubectl("get", "machines", "-n", testNamespace, "-l", "cluster.x-k8s.io/deployment-name=test-worker", "-o", "jsonpath={.items[0].metadata.name}")
+				workerMachineName = strings.TrimSpace(output)
+				return workerMachineName
+			}, 2*time.Minute, 5*time.Second).ShouldNot(BeEmpty())
+
+			By("getting ContaboMachine names created by KCP and MachineDeployment")
+			var controlPlaneContaboMachineName string
+			Eventually(func() string {
+				output, _ := kubectl("get", "contabomachines", "-n", testNamespace, "-l", "cluster.x-k8s.io/control-plane=true", "-o", "jsonpath={.items[0].metadata.name}")
+				controlPlaneContaboMachineName = strings.TrimSpace(output)
+				return controlPlaneContaboMachineName
+			}, 30*time.Second, 5*time.Second).ShouldNot(BeEmpty())
+
+			var workerContaboMachineName string
+			Eventually(func() string {
+				output, _ := kubectl("get", "contabomachines", "-n", testNamespace, "-l", "cluster.x-k8s.io/deployment-name=test-worker", "-o", "jsonpath={.items[0].metadata.name}")
+				workerContaboMachineName = strings.TrimSpace(output)
+				return workerContaboMachineName
+			}, 30*time.Second, 5*time.Second).ShouldNot(BeEmpty())
 
 			By("verifying V76 product type is configured for control plane machine")
 			Eventually(func() string {
-				output, _ := kubectl("get", "contabomachine", "test-control-plane", "-n", testNamespace, "-o", "jsonpath={.spec.instance.productId}")
+				output, _ := kubectl("get", "contabomachine", controlPlaneContaboMachineName, "-n", testNamespace, "-o", "jsonpath={.spec.instance.productId}")
 				return output
-			}, 30*time.Second, 2*time.Second).Should(Equal("V76"))
+			}, 30*time.Second, 5*time.Second).Should(Equal("V76"))
 
 			By("verifying ContaboCluster conditions are properly set")
 			checkConditions("contabocluster", "test-cluster")
@@ -387,42 +421,42 @@ var _ = Describe("Manager", Ordered, func() {
 			}, 30*time.Second, 5*time.Second).Should(Equal("true"))
 
 			By("verifying ContaboMachine conditions are properly set")
-			checkConditions("contabomachine", "test-control-plane")
-			checkConditions("contabomachine", "test-worker")
+			checkConditions("contabomachine", controlPlaneContaboMachineName)
+			checkConditions("contabomachine", workerContaboMachineName)
 
 			By("waiting for ContaboMachine Initialization.Provisioned to be true (control plane)")
 			Eventually(func() string {
-				output, _ := kubectl("get", "contabomachine", "test-control-plane", "-n", testNamespace, "-o", "jsonpath={.status.initialization.provisioned}")
+				output, _ := kubectl("get", "contabomachine", controlPlaneContaboMachineName, "-n", testNamespace, "-o", "jsonpath={.status.initialization.provisioned}")
 				return strings.ToLower(strings.TrimSpace(output))
 			}, 5*time.Minute, 5*time.Second).Should(Equal("true"))
 
 			By("waiting for ContaboMachine Initialization.Provisioned to be true (worker)")
 			Eventually(func() string {
-				output, _ := kubectl("get", "contabomachine", "test-worker", "-n", testNamespace, "-o", "jsonpath={.status.initialization.provisioned}")
+				output, _ := kubectl("get", "contabomachine", workerContaboMachineName, "-n", testNamespace, "-o", "jsonpath={.status.initialization.provisioned}")
 				return strings.ToLower(strings.TrimSpace(output))
 			}, 5*time.Minute, 5*time.Second).Should(Equal("true"))
 
 			By("waiting for ContaboMachine Addresses to be set (control plane)")
 			Eventually(func() string {
-				output, _ := kubectl("get", "contabomachine", "test-control-plane", "-n", testNamespace, "-o", "jsonpath={.status.addresses}")
+				output, _ := kubectl("get", "contabomachine", controlPlaneContaboMachineName, "-n", testNamespace, "-o", "jsonpath={.status.addresses}")
 				return output
 			}, 5*time.Minute, 5*time.Second).ShouldNot(BeEmpty())
 
 			By("waiting for ContaboMachine Addresses to be set (worker)")
 			Eventually(func() string {
-				output, _ := kubectl("get", "contabomachine", "test-worker", "-n", testNamespace, "-o", "jsonpath={.status.addresses}")
+				output, _ := kubectl("get", "contabomachine", workerContaboMachineName, "-n", testNamespace, "-o", "jsonpath={.status.addresses}")
 				return output
 			}, 5*time.Minute, 5*time.Second).ShouldNot(BeEmpty())
 
 			By("waiting for ContaboMachine Ready to be true (control plane)")
 			Eventually(func() string {
-				output, _ := kubectl("get", "contabomachine", "test-control-plane", "-n", testNamespace, "-o", "jsonpath={.status.ready}")
+				output, _ := kubectl("get", "contabomachine", controlPlaneContaboMachineName, "-n", testNamespace, "-o", "jsonpath={.status.ready}")
 				return strings.ToLower(strings.TrimSpace(output))
 			}, 10*time.Minute, 5*time.Second).Should(Equal("true"))
 
 			By("waiting for ContaboMachine Ready to be true (worker)")
 			Eventually(func() string {
-				output, _ := kubectl("get", "contabomachine", "test-worker", "-n", testNamespace, "-o", "jsonpath={.status.ready}")
+				output, _ := kubectl("get", "contabomachine", workerContaboMachineName, "-n", testNamespace, "-o", "jsonpath={.status.ready}")
 				return strings.ToLower(strings.TrimSpace(output))
 			}, 10*time.Minute, 5*time.Second).Should(Equal("true"))
 
@@ -483,20 +517,20 @@ var _ = Describe("Manager", Ordered, func() {
 
 			// Test deletion
 			By("deleting the test cluster and machines")
-			_, err = kubectl("delete", "contabomachine", "test-worker", "-n", testNamespace, "--wait=true")
+			_, err = kubectl("delete", "machinedeployment", "test-worker", "-n", testNamespace, "--wait=false")
 			Expect(err).NotTo(HaveOccurred())
-			_, err = kubectl("delete", "contabomachine", "test-control-plane", "-n", testNamespace, "--wait=true")
+			_, err = kubectl("delete", "kubeadmcontrolplane", "test-control-plane", "-n", testNamespace, "--wait=false")
 			Expect(err).NotTo(HaveOccurred())
-			_, err = kubectl("delete", "cluster", "test-cluster", "-n", testNamespace, "--wait=true")
+			_, err = kubectl("delete", "cluster", "test-cluster", "-n", testNamespace, "--wait=false")
 			Expect(err).NotTo(HaveOccurred())
 
 			By("waiting for ContaboMachines to be deleted")
 			Eventually(func() error {
-				_, err := kubectl("get", "contabomachine", "test-worker", "-n", testNamespace)
+				_, err := kubectl("get", "contabomachine", workerContaboMachineName, "-n", testNamespace)
 				return err
 			}, 2*time.Minute, 5*time.Second).ShouldNot(Succeed())
 			Eventually(func() error {
-				_, err := kubectl("get", "contabomachine", "test-control-plane", "-n", testNamespace)
+				_, err := kubectl("get", "contabomachine", controlPlaneContaboMachineName, "-n", testNamespace)
 				return err
 			}, 2*time.Minute, 5*time.Second).ShouldNot(Succeed())
 

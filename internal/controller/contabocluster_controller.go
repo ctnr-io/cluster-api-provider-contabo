@@ -155,9 +155,6 @@ func (r *ContaboClusterReconciler) reconcileApply(ctx context.Context, contaboCl
 		return result, nil
 	}
 
-	// Mark cluster as fully ready after control plane endpoint is available
-	r.markClusterFullyReady(ctx, contaboCluster)
-
 	return ctrl.Result{}, nil
 }
 
@@ -174,7 +171,7 @@ func (r *ContaboClusterReconciler) markClusterReadyAndProvisioned(ctx context.Co
 			Type:    infrastructurev1beta2.ClusterReadyCondition,
 			Status:  metav1.ConditionTrue,
 			Reason:  infrastructurev1beta2.ClusterAvailableReason,
-			Message: "ContaboCluster infrastructure is ready (waiting for control plane endpoint)",
+			Message: "ContaboCluster infrastructure is ready",
 		})
 
 		contaboCluster.Status.Ready = true
@@ -185,27 +182,6 @@ func (r *ContaboClusterReconciler) markClusterReadyAndProvisioned(ctx context.Co
 			contaboCluster.Status.Initialization = &infrastructurev1beta2.ContaboClusterInitializationStatus{}
 		}
 		contaboCluster.Status.Initialization.Provisioned = true
-	}
-}
-
-// markClusterProvisioned updates the cluster condition message to indicate full readiness with control plane endpoint
-func (r *ContaboClusterReconciler) markClusterFullyReady(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) {
-	log := logf.FromContext(ctx)
-
-	// Update message to indicate fully ready once control plane endpoint is set
-	if contaboCluster.Spec.ControlPlaneEndpoint != nil && contaboCluster.Status.Ready {
-		// Check if message needs updating
-		condition := meta.FindStatusCondition(contaboCluster.Status.Conditions, infrastructurev1beta2.ClusterReadyCondition)
-		if condition != nil && condition.Message != "ContaboCluster is fully ready" {
-			log.Info("All components including control plane endpoint are ready, ContaboCluster is fully ready")
-
-			meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
-				Type:    infrastructurev1beta2.ClusterReadyCondition,
-				Status:  metav1.ConditionTrue,
-				Reason:  infrastructurev1beta2.ClusterAvailableReason,
-				Message: "ContaboCluster is fully ready",
-			})
-		}
 	}
 }
 
@@ -445,14 +421,27 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 func (r *ContaboClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) ctrl.Result {
 	log := logf.FromContext(ctx)
 
-	// TODO: Handle case where control plane endpoint is set but not reachable
+	// Currently, we always use the first control plane machine's IP as the control plane endpoint,
+	if contaboCluster.Spec.ControlPlaneEndpoint != nil && contaboCluster.Spec.ControlPlaneEndpoint.Host != "" {
+		log.Info("Control plane endpoint already set", "controlPlaneEndpoint", contaboCluster.Spec.ControlPlaneEndpoint)
+		return ctrl.Result{}
+	}
+
+	// The actual endpoint will be set by ContaboMachine controller when first control plane gets an IP
+	if contaboCluster.Spec.ControlPlaneEndpoint == nil {
+		contaboCluster.Spec.ControlPlaneEndpoint = &clusterv1.APIEndpoint{
+			Host: "", // Empty host allows KCP to proceed, will be updated by ContaboMachine controller
+			Port: 6443,
+		}
+		log.Info("Set temporary empty control plane endpoint to allow KCP to create machines")
+	}
 
 	// Retrieve control plane endpoint from the first ContaboMachine in the cluster
-	machineList := &infrastructurev1beta2.ContaboMachineList{}
-	if err := r.List(ctx, machineList, client.InNamespace(contaboCluster.Namespace), client.MatchingLabels{
+	contaboMachineList := &infrastructurev1beta2.ContaboMachineList{}
+	if err := r.List(ctx, contaboMachineList, client.InNamespace(contaboCluster.Namespace), client.MatchingLabels{
 		clusterv1.ClusterNameLabel:         contaboCluster.Name,
 		clusterv1.MachineControlPlaneLabel: "true",
-	}); err != nil || len(machineList.Items) == 0 {
+	}); err != nil || len(contaboMachineList.Items) == 0 {
 		log.Info("No control plane machines found yet, requeuing")
 		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
 			Type:   clusterv1.ClusterControlPlaneAvailableCondition,
@@ -462,7 +451,7 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Con
 		return ctrl.Result{RequeueAfter: 10 * time.Second}
 	}
 
-	firstControlPlaneMachine := machineList.Items[0]
+	firstControlPlaneMachine := contaboMachineList.Items[0]
 	if firstControlPlaneMachine.Status.Instance == nil || firstControlPlaneMachine.Status.Instance.IpConfig.V4.Ip == "" {
 		log.Info("Control plane machine instance or IP not yet available, requeuing", "machine", firstControlPlaneMachine.Name)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}
@@ -576,17 +565,17 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 
 	// Remove our finalizer from the list and update it if there is no more contabomachines
 	// 1. Get all contabomachines
-	machineList := &infrastructurev1beta2.ContaboMachineList{}
-	if err := r.List(ctx, machineList, client.InNamespace(contaboCluster.Namespace), client.MatchingLabels{
+	contaboMachineList := &infrastructurev1beta2.ContaboMachineList{}
+	if err := r.List(ctx, contaboMachineList, client.InNamespace(contaboCluster.Namespace), client.MatchingLabels{
 		clusterv1.ClusterNameLabel: contaboCluster.Name,
 	}); err != nil {
 		log.Error(err, "Failed to list ContaboMachines, continuing with deletion")
 	}
 
 	// 2. If there are still contabomachines, requeue the deletion
-	if len(machineList.Items) > 0 {
-		err := fmt.Errorf("there are still %d ContaboMachines in the cluster", len(machineList.Items))
-		log.Error(err, "There are still ContaboMachines in the cluster, requeuing deletion", "contaboMachines", len(machineList.Items))
+	if len(contaboMachineList.Items) > 0 {
+		err := fmt.Errorf("there are still %d ContaboMachines in the cluster", len(contaboMachineList.Items))
+		log.Error(err, "There are still ContaboMachines in the cluster, requeuing deletion", "contaboMachines", len(contaboMachineList.Items))
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 	}
 
