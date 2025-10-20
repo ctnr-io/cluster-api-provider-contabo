@@ -148,7 +148,7 @@ func (r *ContaboClusterReconciler) reconcileApply(ctx context.Context, contaboCl
 
 	// Mark cluster infrastructure as ready after private network and SSH keys are created
 	// This allows KubeadmControlPlane to proceed with creating control plane machines
-	r.markClusterReady(ctx, contaboCluster)
+	r.markClusterReadyAndProvisioned(ctx, contaboCluster)
 
 	// Check if control plane endpoint is set (this happens after first control plane machine is created)
 	if result := r.reconcileControlPlaneEndpoint(ctx, contaboCluster); result.RequeueAfter != 0 {
@@ -156,14 +156,14 @@ func (r *ContaboClusterReconciler) reconcileApply(ctx context.Context, contaboCl
 	}
 
 	// Mark cluster as fully ready after control plane endpoint is available
-	r.markClusterProvisioned(ctx, contaboCluster)
+	r.markClusterFullyReady(ctx, contaboCluster)
 
 	return ctrl.Result{}, nil
 }
 
 // markClusterReady sets the cluster infrastructure as ready after private network and SSH keys are created
 // This signals to KubeadmControlPlane that it can start creating control plane machines
-func (r *ContaboClusterReconciler) markClusterReady(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) {
+func (r *ContaboClusterReconciler) markClusterReadyAndProvisioned(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) {
 	log := logf.FromContext(ctx)
 
 	// Only mark as ready if not already ready and private network + SSH key are available
@@ -178,26 +178,33 @@ func (r *ContaboClusterReconciler) markClusterReady(ctx context.Context, contabo
 		})
 
 		contaboCluster.Status.Ready = true
+
+		// This is what the Cluster controller checks via the v1beta2 contract
+		// which KubeadmControlPlane waits for before creating machines
+		if contaboCluster.Status.Initialization == nil {
+			contaboCluster.Status.Initialization = &infrastructurev1beta2.ContaboClusterInitializationStatus{}
+		}
+		contaboCluster.Status.Initialization.Provisioned = true
 	}
 }
 
-// markClusterProvisioned sets the ClusterReadyCondition to true if all components are ready including control plane endpoint
-func (r *ContaboClusterReconciler) markClusterProvisioned(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) {
+// markClusterProvisioned updates the cluster condition message to indicate full readiness with control plane endpoint
+func (r *ContaboClusterReconciler) markClusterFullyReady(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) {
 	log := logf.FromContext(ctx)
 
-	// Update message to indicate fully ready
-	if contaboCluster.Status.Initialization == nil || !contaboCluster.Status.Initialization.Provisioned && contaboCluster.Spec.ControlPlaneEndpoint != nil {
-		log.Info("All components including control plane endpoint are ready, ContaboCluster is fully ready")
+	// Update message to indicate fully ready once control plane endpoint is set
+	if contaboCluster.Spec.ControlPlaneEndpoint != nil && contaboCluster.Status.Ready {
+		// Check if message needs updating
+		condition := meta.FindStatusCondition(contaboCluster.Status.Conditions, infrastructurev1beta2.ClusterReadyCondition)
+		if condition != nil && condition.Message != "ContaboCluster is fully ready" {
+			log.Info("All components including control plane endpoint are ready, ContaboCluster is fully ready")
 
-		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
-			Type:    infrastructurev1beta2.ClusterReadyCondition,
-			Status:  metav1.ConditionTrue,
-			Reason:  infrastructurev1beta2.ClusterAvailableReason,
-			Message: "ContaboCluster is fully ready",
-		})
-
-		contaboCluster.Status.Initialization = &infrastructurev1beta2.ContaboClusterInitializationStatus{
-			Provisioned: true,
+			meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+				Type:    infrastructurev1beta2.ClusterReadyCondition,
+				Status:  metav1.ConditionTrue,
+				Reason:  infrastructurev1beta2.ClusterAvailableReason,
+				Message: "ContaboCluster is fully ready",
+			})
 		}
 	}
 }
