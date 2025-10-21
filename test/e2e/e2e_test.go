@@ -118,6 +118,8 @@ var _ = Describe("Manager", Ordered, func() {
 			exec.Command("kubectl", "delete", "machinesets", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 			exec.Command("kubectl", "delete", "kubeadmconfigs", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 			exec.Command("kubectl", "delete", "kubeadmconfigtemplates", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+			exec.Command("kubectl", "delete", "services", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+			exec.Command("kubectl", "delete", "endpointslices", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 		})
 
 		// Wait for reconciliation
@@ -339,13 +341,6 @@ var _ = Describe("Manager", Ordered, func() {
 			}, 120*time.Second, 10*time.Second).ShouldNot(BeEmpty())
 		}
 
-		BeforeEach(func() {
-			By("cleaning up test resources")
-			kubectl("delete", "namespace", testNamespace, "--ignore-not-found=true", "--timeout=60s")
-			By("creating test namespace")
-			kubectl("create", "namespace", testNamespace)
-		})
-
 		It("creates ContaboCluster and control plane with V76 product", func() {
 			clusterManifest, err := os.ReadFile("test/fixtures/cluster.yaml")
 			if err != nil {
@@ -374,7 +369,7 @@ var _ = Describe("Manager", Ordered, func() {
 			By("waiting for KubeadmControlPlane to create control plane machines")
 			var controlPlaneMachineName string
 			Eventually(func() string {
-				output, _ := kubectl("get", "machines", "-n", testNamespace, "-l", "cluster.x-k8s.io/control-plane=true", "-o", "jsonpath={.items[0].metadata.name}")
+				output, _ := kubectl("get", "machines", "-n", testNamespace, "-l", "cluster.x-k8s.io/control-plane", "-o", "jsonpath={.items[0].metadata.name}")
 				controlPlaneMachineName = strings.TrimSpace(output)
 				return controlPlaneMachineName
 			}, 2*time.Minute, 5*time.Second).ShouldNot(BeEmpty())
@@ -390,7 +385,7 @@ var _ = Describe("Manager", Ordered, func() {
 			By("getting ContaboMachine names created by KCP and MachineDeployment")
 			var controlPlaneContaboMachineName string
 			Eventually(func() string {
-				output, _ := kubectl("get", "contabomachines", "-n", testNamespace, "-l", "cluster.x-k8s.io/control-plane=true", "-o", "jsonpath={.items[0].metadata.name}")
+				output, _ := kubectl("get", "contabomachines", "-n", testNamespace, "-l", "cluster.x-k8s.io/control-plane", "-o", "jsonpath={.items[0].metadata.name}")
 				controlPlaneContaboMachineName = strings.TrimSpace(output)
 				return controlPlaneContaboMachineName
 			}, 30*time.Second, 5*time.Second).ShouldNot(BeEmpty())
@@ -459,6 +454,64 @@ var _ = Describe("Manager", Ordered, func() {
 				output, _ := kubectl("get", "contabomachine", workerContaboMachineName, "-n", testNamespace, "-o", "jsonpath={.status.ready}")
 				return strings.ToLower(strings.TrimSpace(output))
 			}, 10*time.Minute, 5*time.Second).Should(Equal("true"))
+
+			By("verifying control plane endpoint is set")
+			Eventually(func() string {
+				output, _ := kubectl("get", "contabocluster", "test-cluster", "-n", testNamespace, "-o", "jsonpath={.spec.controlPlaneEndpoint.host}")
+				controlPlaneEndpointHost := strings.TrimSpace(output)
+				return controlPlaneEndpointHost
+			}, 30*time.Second, 5*time.Second).ShouldNot(BeEmpty())
+
+			By("verifying control plane endpoint Service is created")
+			serviceName := fmt.Sprintf("%s-apiserver", "test-cluster")
+			Eventually(func() error {
+				_, err := kubectl("get", "service", serviceName, "-n", testNamespace)
+				return err
+			}, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("verifying control plane endpoint Service is headless")
+			Eventually(func() string {
+				output, _ := kubectl("get", "service", serviceName, "-n", testNamespace, "-o", "jsonpath={.spec.clusterIP}")
+				return strings.TrimSpace(output)
+			}, 30*time.Second, 5*time.Second).Should(Equal("None"))
+
+			By("verifying control plane endpoint Service has correct port")
+			Eventually(func() string {
+				output, _ := kubectl("get", "service", serviceName, "-n", testNamespace, "-o", "jsonpath={.spec.ports[0].port}")
+				return strings.TrimSpace(output)
+			}, 30*time.Second, 5*time.Second).Should(Equal("6443"))
+
+			By("verifying control plane endpoint EndpointSlice is created")
+			endpointSliceName := fmt.Sprintf("%s-apiserver", "test-cluster")
+			Eventually(func() error {
+				_, err := kubectl("get", "endpointslice", endpointSliceName, "-n", testNamespace)
+				return err
+			}, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("verifying EndpointSlice has control plane instance IP")
+			Eventually(func() string {
+				output, _ := kubectl("get", "endpointslice", endpointSliceName, "-n", testNamespace, "-o", "jsonpath={.endpoints[*].addresses[0]}")
+				return strings.TrimSpace(output)
+			}, 30*time.Second, 5*time.Second).ShouldNot(BeEmpty())
+
+			By("verifying EndpointSlice endpoint matches control plane machine IP")
+			var controlPlaneMachineIP string
+			Eventually(func() string {
+				output, _ := kubectl("get", "contabomachine", controlPlaneContaboMachineName, "-n", testNamespace, "-o", "jsonpath={.status.instance.ipConfig.v4.ip}")
+				controlPlaneMachineIP = strings.TrimSpace(output)
+				return controlPlaneMachineIP
+			}, 30*time.Second, 5*time.Second).ShouldNot(BeEmpty())
+
+			Eventually(func() string {
+				output, _ := kubectl("get", "endpointslice", endpointSliceName, "-n", testNamespace, "-o", "jsonpath={.endpoints[*].addresses[0]}")
+				return strings.TrimSpace(output)
+			}, 30*time.Second, 5*time.Second).Should(Equal(controlPlaneMachineIP))
+
+			By("verifying EndpointSlice has correct labels")
+			Eventually(func() string {
+				output, _ := kubectl("get", "endpointslice", endpointSliceName, "-n", testNamespace, "-o", "jsonpath={.metadata.labels.kubernetes\\.io/service-name}")
+				return strings.TrimSpace(output)
+			}, 30*time.Second, 5*time.Second).Should(Equal(serviceName))
 
 			By("waiting for workload cluster kubeconfig secret to be available")
 			var kubeconfigB64 string
@@ -531,6 +584,18 @@ var _ = Describe("Manager", Ordered, func() {
 			}, 2*time.Minute, 5*time.Second).ShouldNot(Succeed())
 			Eventually(func() error {
 				_, err := kubectl("get", "contabomachine", controlPlaneContaboMachineName, "-n", testNamespace)
+				return err
+			}, 2*time.Minute, 5*time.Second).ShouldNot(Succeed())
+
+			By("verifying control plane endpoint Service is deleted")
+			Eventually(func() error {
+				_, err := kubectl("get", "service", serviceName, "-n", testNamespace)
+				return err
+			}, 2*time.Minute, 5*time.Second).ShouldNot(Succeed())
+
+			By("verifying control plane endpoint EndpointSlice is deleted")
+			Eventually(func() error {
+				_, err := kubectl("get", "endpointslice", endpointSliceName, "-n", testNamespace)
 				return err
 			}, 2*time.Minute, 5*time.Second).ShouldNot(Succeed())
 

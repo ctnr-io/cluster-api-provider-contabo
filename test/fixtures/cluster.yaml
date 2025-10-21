@@ -5,6 +5,9 @@ metadata:
   name: test-cluster
   namespace: contabo-e2e-test
 spec:
+  controlPlaneEndpoint:
+    host: test-cluster-apiserver.contabo-e2e-test.svc.cluster.local
+    port: 6443
   privateNetwork:
     region: EU
 ---
@@ -55,24 +58,15 @@ spec:
       kind: ContaboMachineTemplate
       apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
       name: test-control-plane
-  # kubeadmConfigSpec:
-  #   initConfiguration:
-  #     nodeRegistration:
-  #       kubeletExtraArgs:
-  #         provider-id: "contabo://{{ ds.meta_data.instance_id }}"
-  #   joinConfiguration:
-  #     nodeRegistration:
-  #       kubeletExtraArgs:
-  #         provider-id: "contabo://{{ ds.meta_data.instance_id }}"
-  #   clusterConfiguration:
-  #     apiServer:
-  #       certSANs:
-  #       - localhost
-  #       - 127.0.0.1
-  #     controllerManager:
-  #       extraArgs:
-  #         enable-hostpath-provisioner: "true"
-
+  kubeadmConfigSpec:
+    clusterConfiguration:
+      apiServer:
+        certSANs:
+          # Add the service name as a SAN for TLS validation
+          # This allows connecting to the API server using the service name
+          - test-cluster-apiserver
+          - test-cluster-apiserver.contabo-e2e-test
+          - test-cluster-apiserver.contabo-e2e-test.svc.cluster.local
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ContaboMachineTemplate

@@ -25,9 +25,9 @@ spec:
       jsonPath: .status.ready
       name: Ready
       type: string
-    - description: Private Networks
+    - description: Private Network
       jsonPath: .status.privateNetwork.name
-      name: Private Networks
+      name: Private Network
       type: string
     - description: API Endpoint
       jsonPath: .spec.controlPlaneEndpoint.host

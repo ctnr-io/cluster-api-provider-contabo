@@ -23,6 +23,9 @@ kind: ContaboCluster
 metadata:
   name: ${CLUSTER_NAME}
 spec:
+  controlPlaneEndpoint:
+    host: "${CONTROL_PLANE_ENDPOINT_HOST}"
+    port: ${CONTROL_PLANE_ENDPOINT_PORT:=6443}
   privateNetwork:
     region: ${CONTABO_REGION:=EU}
 ---
@@ -40,6 +43,8 @@ spec:
       name: "${CLUSTER_NAME}-control-plane"
   kubeadmConfigSpec:
     initConfiguration:
+      skipPhases:
+        - addon/kube-proxy
       nodeRegistration:
         name: '{{ ds.meta_data.hostname }}'
         kubeletExtraArgs:
@@ -51,6 +56,14 @@ spec:
           cloud-provider: external
     clusterConfiguration:
       apiServer:
+        certSANs:
+          # Add the service name as a SAN for TLS validation
+          # This allows connecting to the API server using the service name
+          - "${CLUSTER_NAME}-apiserver"
+          - "${CLUSTER_NAME}-apiserver.${NAMESPACE}.svc"
+          - "${CLUSTER_NAME}-apiserver.${NAMESPACE}.svc.cluster.local"
+          # Also add the external hostname if configured
+          - "${CONTROL_PLANE_ENDPOINT_HOST}"
         extraArgs:
           cloud-provider: external
       controllerManager:

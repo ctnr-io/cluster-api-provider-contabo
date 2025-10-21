@@ -261,12 +261,37 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 func (r *ContaboMachineReconciler) waitForClusterControlPlaneEndpoint(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) ctrl.Result {
 	log := logf.FromContext(ctx)
 
-	if contaboCluster.Spec.ControlPlaneEndpoint == nil || contaboCluster.Spec.ControlPlaneEndpoint.Host == "" {
+	if contaboCluster.Spec.ControlPlaneEndpoint == nil {
 		log.Info("Waiting for contabo cluster control plane endpoint to be initialized", "contaboCluster", contaboCluster.Name)
+		// Trigger cluster reconciliation
+		r.triggerClusterReconciliation(ctx, contaboCluster)
 		return ctrl.Result{RequeueAfter: 15 * time.Second}
 	}
 
 	return ctrl.Result{}
+}
+
+func (r *ContaboMachineReconciler) triggerClusterReconciliation(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) {
+	log := logf.FromContext(ctx)
+
+	// Patch the ContaboCluster to trigger reconciliation
+	patchHelper, err := patch.NewHelper(contaboCluster, r.Client)
+	if err != nil {
+		log.Error(err, "failed to create patch helper for ContaboCluster", "contaboCluster", contaboCluster.Name)
+		return
+	}
+
+	// Add an annotation to trigger reconciliation
+	if contaboCluster.Annotations == nil {
+		contaboCluster.Annotations = make(map[string]string)
+	}
+	contaboCluster.Annotations["contabo.cluster.x-k8s.io/force-reconcile"] = time.Now().Format(time.RFC3339)
+
+	// Patch the ContaboCluster with the updated annotations
+	if err := patchHelper.Patch(ctx, contaboCluster); err != nil {
+		log.Error(err, "failed to patch ContaboCluster", "contaboCluster", contaboCluster.Name)
+		return
+	}
 }
 
 // setupContaboMachine handles initial machine setup and validation
@@ -875,7 +900,7 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 			return ctrl.Result{}, err
 		}
 
-		if strings.Contains(*output, "status: runnine") {
+		if strings.Contains(*output, "status: running") {
 			log.Info("cloud-init is still running, will retry", "output", *output, "requeueAfter", "20s")
 			return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
 		}

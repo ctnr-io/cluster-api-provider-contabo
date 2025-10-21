@@ -52,6 +52,9 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/utils/ptr"
 )
 
 // ContaboClusterReconciler reconciles a ContaboCluster object
@@ -67,6 +70,8 @@ type ContaboClusterReconciler struct {
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=contaboclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=contaboclusters/finalizers,verbs=update
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=discovery.k8s.io,resources=endpointslices,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -126,10 +131,6 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 }
 
 func (r *ContaboClusterReconciler) reconcileApply(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
-
-	log.Info("Starting ContaboCluster reconciliation", "cluster", contaboCluster.Name)
-
 	// Initialize basic cluster setup
 	controllerutil.AddFinalizer(contaboCluster, infrastructurev1beta2.ClusterFinalizer)
 
@@ -150,9 +151,9 @@ func (r *ContaboClusterReconciler) reconcileApply(ctx context.Context, contaboCl
 	// This allows KubeadmControlPlane to proceed with creating control plane machines
 	r.markClusterReadyAndProvisioned(ctx, contaboCluster)
 
-	// Check if control plane endpoint is set (this happens after first control plane machine is created)
-	if result := r.reconcileControlPlaneEndpoint(ctx, contaboCluster); result.RequeueAfter != 0 {
-		return result, nil
+	// Create and/or use control plane endpoint proxy service and endpoint slices to be able to connect w/ kubeconfig
+	if result, err := r.reconcileControlPlaneEndpoint(ctx, contaboCluster); err != nil || result.RequeueAfter != 0 {
+		return result, err
 	}
 
 	return ctrl.Result{}, nil
@@ -222,6 +223,8 @@ func (r *ContaboClusterReconciler) ensureClusterUUID(ctx context.Context, contab
 func (r *ContaboClusterReconciler) reconcilePrivateNetwork(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
 	log := logf.FromContext(ctx)
 
+	log.Info("Reconciling private network for ContaboCluster", "cluster", contaboCluster.Name)
+
 	// Check if private network was created
 	if contaboCluster.Status.PrivateNetwork == nil {
 		var privateNetwork *models.PrivateNetworkResponse
@@ -289,6 +292,8 @@ func (r *ContaboClusterReconciler) reconcilePrivateNetwork(ctx context.Context, 
 // reconcileSSHKey ensures the SSH key exists and is configured
 func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
 	log := logf.FromContext(ctx)
+
+	log.Info("Reconciling SSH key for ContaboCluster", "cluster", contaboCluster.Name)
 
 	// Check if SSH key was created
 	if contaboCluster.Status.SshKey == nil {
@@ -418,62 +423,258 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 }
 
 // reconcileControlPlaneEndpoint ensures the control plane endpoint is set
-func (r *ContaboClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) ctrl.Result {
+func (r *ContaboClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	// Currently, we always use the first control plane machine's IP as the control plane endpoint,
-	if contaboCluster.Spec.ControlPlaneEndpoint != nil && contaboCluster.Spec.ControlPlaneEndpoint.Host != "" {
-		log.Info("Control plane endpoint already set", "controlPlaneEndpoint", contaboCluster.Spec.ControlPlaneEndpoint)
-		return ctrl.Result{}
-	}
+	log.Info("Reconciling control plane endpoint for ContaboCluster", "cluster", contaboCluster.Name)
 
-	// The actual endpoint will be set by ContaboMachine controller when first control plane gets an IP
+	// First, create the control plane endpoint if not set
 	if contaboCluster.Spec.ControlPlaneEndpoint == nil {
+		// Service name must match the control plane endpoint host for DNS resolution
+		serviceName := fmt.Sprintf("%s-apiserver", contaboCluster.Name)
+		// Set control plane endpoint using the first control plane machine's IP
 		contaboCluster.Spec.ControlPlaneEndpoint = &clusterv1.APIEndpoint{
-			Host: "", // Empty host allows KCP to proceed, will be updated by ContaboMachine controller
-			Port: 6443,
-		}
-		log.Info("Set temporary empty control plane endpoint to allow KCP to create machines")
-	}
-
-	// Retrieve control plane endpoint from the first ContaboMachine in the cluster
-	contaboMachineList := &infrastructurev1beta2.ContaboMachineList{}
-	if err := r.List(ctx, contaboMachineList, client.InNamespace(contaboCluster.Namespace), client.MatchingLabels{
-		clusterv1.ClusterNameLabel:         contaboCluster.Name,
-		clusterv1.MachineControlPlaneLabel: "true",
-	}); err != nil || len(contaboMachineList.Items) == 0 {
-		log.Info("No control plane machines found yet, requeuing")
-		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
-			Type:   clusterv1.ClusterControlPlaneAvailableCondition,
-			Status: metav1.ConditionFalse,
-			Reason: clusterv1.WaitingForControlPlaneInitializedReason,
-		})
-		return ctrl.Result{RequeueAfter: 10 * time.Second}
-	}
-
-	firstControlPlaneMachine := contaboMachineList.Items[0]
-	if firstControlPlaneMachine.Status.Instance == nil || firstControlPlaneMachine.Status.Instance.IpConfig.V4.Ip == "" {
-		log.Info("Control plane machine instance or IP not yet available, requeuing", "machine", firstControlPlaneMachine.Name)
-		return ctrl.Result{RequeueAfter: 10 * time.Second}
-	}
-
-	// If control plane endpoint is not set by user, set it using the first control plane machine's IP
-	if contaboCluster.Spec.ControlPlaneEndpoint == nil {
-		// Set control plane endpoint
-		contaboCluster.Spec.ControlPlaneEndpoint = &clusterv1.APIEndpoint{
-			Host: firstControlPlaneMachine.Status.Instance.IpConfig.V4.Ip,
+			Host: serviceName,
 			Port: 6443, // Default Kubernetes API server port
 		}
-
 		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
 			Type:   clusterv1.ClusterControlPlaneAvailableCondition,
 			Status: metav1.ConditionTrue,
 			Reason: clusterv1.ClusterControlPlaneMachinesReadyReason,
 		})
 		log.Info("Using control plane endpoint", "controlPlaneEndpoint", contaboCluster.Spec.ControlPlaneEndpoint)
+	} else {
+		log.Info("Control plane endpoint already set", "controlPlaneEndpoint", contaboCluster.Spec.ControlPlaneEndpoint)
 	}
 
-	return ctrl.Result{}
+	// Retrieve control plane endpoint from the first ContaboMachine in the cluster
+	controlPlaneMachines := &infrastructurev1beta2.ContaboMachineList{}
+	if err := r.List(ctx, controlPlaneMachines, client.InNamespace(contaboCluster.Namespace), client.MatchingLabels{clusterv1.ClusterNameLabel: contaboCluster.Name}, client.HasLabels{clusterv1.MachineControlPlaneLabel}); err != nil || len(controlPlaneMachines.Items) == 0 {
+		log.Info("No control plane machines found yet, requeuing")
+		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+			Type:   clusterv1.ClusterControlPlaneAvailableCondition,
+			Status: metav1.ConditionFalse,
+			Reason: clusterv1.WaitingForControlPlaneInitializedReason,
+		})
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	// reconcile controlplane endpoint service and endpoint slices for the control plane endpoint
+	if err := r.reconcileControlPlaneService(ctx, contaboCluster); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.reconcileControlPlaneEndpointSlices(ctx, contaboCluster, controlPlaneMachines); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *ContaboClusterReconciler) reconcileControlPlaneService(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
+	log := logf.FromContext(ctx)
+
+	// Service name must match the control plane endpoint host for DNS resolution
+	serviceName := fmt.Sprintf("%s-apiserver", contaboCluster.Name)
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      serviceName,
+			Namespace: contaboCluster.Namespace,
+			Labels: map[string]string{
+				clusterv1.ClusterNameLabel: contaboCluster.Name,
+				"component":                "apiserver",
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: contaboCluster.APIVersion,
+					Kind:       contaboCluster.Kind,
+					Name:       contaboCluster.Name,
+					UID:        contaboCluster.UID,
+					Controller: ptr.To(true),
+				},
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Type:      corev1.ServiceTypeClusterIP,
+			ClusterIP: "None", // Headless service
+			Ports: []corev1.ServicePort{
+				{
+					Name:     "https",
+					Port:     contaboCluster.Spec.ControlPlaneEndpoint.Port,
+					Protocol: corev1.ProtocolTCP,
+				},
+			},
+		},
+	}
+
+	// Try to get existing service
+	existingService := &corev1.Service{}
+	err := r.Get(ctx, client.ObjectKey{
+		Name:      serviceName,
+		Namespace: contaboCluster.Namespace,
+	}, existingService)
+
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// Create the service
+			log.Info("Creating control plane endpoint service", "serviceName", serviceName)
+			if err := r.Create(ctx, service); err != nil {
+				return fmt.Errorf("failed to create control plane endpoint service: %w", err)
+			}
+			log.Info("Created control plane endpoint service", "serviceName", serviceName)
+		} else {
+			return fmt.Errorf("failed to get control plane endpoint service: %w", err)
+		}
+	} else {
+		// Update the service if needed
+		existingService.Spec.Ports = service.Spec.Ports
+		log.Info("Updating control plane endpoint service", "serviceName", serviceName)
+		if err := r.Update(ctx, existingService); err != nil {
+			return fmt.Errorf("failed to update control plane endpoint service: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (r *ContaboClusterReconciler) reconcileControlPlaneEndpointSlices(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster, controlPlaneContaboMachineList *infrastructurev1beta2.ContaboMachineList) error {
+	log := logf.FromContext(ctx)
+
+	// Service name must match the control plane endpoint host for DNS resolution
+	serviceName := fmt.Sprintf("%s-apiserver", contaboCluster.Name)
+	endpointSliceName := fmt.Sprintf("%s-apiserver", contaboCluster.Name)
+
+	// Collect all control plane instance IPs
+	var endpoints []discoveryv1.Endpoint
+	for _, machine := range controlPlaneContaboMachineList.Items {
+		if machine.Status.Instance != nil && machine.Status.Instance.IpConfig.V4.Ip != "" {
+			endpoints = append(endpoints, discoveryv1.Endpoint{
+				Addresses: []string{machine.Status.Instance.IpConfig.V4.Ip},
+				Conditions: discoveryv1.EndpointConditions{
+					Ready: ptr.To(true),
+				},
+			})
+		}
+	}
+
+	endpointPort := contaboCluster.Spec.ControlPlaneEndpoint.Port
+
+	endpointSlice := &discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      endpointSliceName,
+			Namespace: contaboCluster.Namespace,
+			Labels: map[string]string{
+				clusterv1.ClusterNameLabel:   contaboCluster.Name,
+				"component":                  "apiserver",
+				discoveryv1.LabelServiceName: serviceName,
+				discoveryv1.LabelManagedBy:   "cluster-api-provider-contabo",
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: contaboCluster.APIVersion,
+					Kind:       contaboCluster.Kind,
+					Name:       contaboCluster.Name,
+					UID:        contaboCluster.UID,
+					Controller: ptr.To(true),
+				},
+			},
+		},
+		AddressType: discoveryv1.AddressTypeIPv4,
+		Endpoints:   endpoints,
+		Ports: []discoveryv1.EndpointPort{
+			{
+				Name:     ptr.To("https"),
+				Port:     ptr.To(endpointPort),
+				Protocol: ptr.To(corev1.ProtocolTCP),
+			},
+		},
+	}
+
+	// Try to get existing endpoint slice
+	existingEndpointSlice := &discoveryv1.EndpointSlice{}
+	err := r.Get(ctx, client.ObjectKey{
+		Name:      endpointSliceName,
+		Namespace: contaboCluster.Namespace,
+	}, existingEndpointSlice)
+
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// Create the endpoint slice
+			log.Info("Creating control plane endpoint slice", "endpointSliceName", endpointSliceName, "endpointCount", len(endpoints))
+			if err := r.Create(ctx, endpointSlice); err != nil {
+				return fmt.Errorf("failed to create control plane endpoint slice: %w", err)
+			}
+			log.Info("Created control plane endpoint slice", "endpointSliceName", endpointSliceName)
+		} else {
+			return fmt.Errorf("failed to get control plane endpoint slice: %w", err)
+		}
+	} else {
+		// Update the endpoint slice if needed
+		existingEndpointSlice.Endpoints = endpointSlice.Endpoints
+		existingEndpointSlice.Ports = endpointSlice.Ports
+		log.Info("Updating control plane endpoint slice", "endpointSliceName", endpointSliceName, "endpointCount", len(endpoints))
+		if err := r.Update(ctx, existingEndpointSlice); err != nil {
+			return fmt.Errorf("failed to update control plane endpoint slice: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (r *ContaboClusterReconciler) deleteControlPlaneService(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
+	log := logf.FromContext(ctx)
+
+	// If control plane endpoint was never set, nothing to delete
+	if contaboCluster.Spec.ControlPlaneEndpoint == nil {
+		return nil
+	}
+
+	// Service name matches the control plane endpoint host
+	serviceName := fmt.Sprintf("%s-apiserver", contaboCluster.Name)
+
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      serviceName,
+			Namespace: contaboCluster.Namespace,
+		},
+	}
+
+	err := r.Delete(ctx, service)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("Control plane endpoint service already deleted", "serviceName", serviceName)
+			return nil
+		}
+		return fmt.Errorf("failed to delete control plane endpoint service: %w", err)
+	}
+
+	log.Info("Deleted control plane endpoint service", "serviceName", serviceName)
+	return nil
+}
+
+func (r *ContaboClusterReconciler) deleteControlPlaneEndpointSlices(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
+	log := logf.FromContext(ctx)
+
+	endpointSliceName := fmt.Sprintf("%s-apiserver", contaboCluster.Name)
+
+	endpointSlice := &discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      endpointSliceName,
+			Namespace: contaboCluster.Namespace,
+		},
+	}
+
+	err := r.Delete(ctx, endpointSlice)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("Control plane endpoint slice already deleted", "endpointSliceName", endpointSliceName)
+			return nil
+		}
+		return fmt.Errorf("failed to delete control plane endpoint slice: %w", err)
+	}
+
+	log.Info("Deleted control plane endpoint slice", "endpointSliceName", endpointSliceName)
+	return nil
 }
 
 // reconcileDelete may return different ctrl.Result values in future implementations
@@ -577,6 +778,15 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 		err := fmt.Errorf("there are still %d ContaboMachines in the cluster", len(contaboMachineList.Items))
 		log.Error(err, "There are still ContaboMachines in the cluster, requeuing deletion", "contaboMachines", len(contaboMachineList.Items))
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+	}
+
+	// Rmeove controlplane service and endpointslices
+	if err := r.deleteControlPlaneService(ctx, contaboCluster); err != nil {
+		log.Error(err, "Failed to delete control plane endpoint service, continuing with deletion")
+	}
+
+	if err := r.deleteControlPlaneEndpointSlices(ctx, contaboCluster); err != nil {
+		log.Error(err, "Failed to delete control plane endpoint slices, continuing with deletion")
 	}
 
 	// 3. If there are no more contabomachines, remove the finalizer

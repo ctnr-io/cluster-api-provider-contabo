@@ -40,7 +40,7 @@ var (
 
 	// projectImage is the name of the image which will be build and loaded
 	// with the code source changes to be tested.
-	projectImage = "cluster-api-provider-contabo:e2e-test"
+	projectImage = getProjectImage()
 )
 
 // TestE2E runs the end-to-end (e2e) test suite for the project. These tests execute in an isolated,
@@ -85,6 +85,8 @@ var _ = BeforeSuite(func() {
 		exec.Command("kubectl", "delete", "machinesets", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 		exec.Command("kubectl", "delete", "kubeadmconfigs", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 		exec.Command("kubectl", "delete", "kubeadmconfigtemplates", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "services", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
+		exec.Command("kubectl", "delete", "endpointslices", "--all", "-n", "contabo-e2e-test", "--ignore-not-found=true"),
 	})
 
 	var cmd *exec.Cmd
@@ -126,11 +128,6 @@ var _ = BeforeSuite(func() {
 	// 	_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CertManager...\n")
 	// 	utils.UninstallCertManager()
 	// }
-
-	By("building the manager(Operator) image and loading into Kind")
-	cmd = exec.Command("make", "docker-build-kind", fmt.Sprintf("IMG=%s", projectImage))
-	_, err = utils.Run(cmd)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build and load the manager(Operator) image")
 
 	// The tests-e2e are intended to run on a temporary cluster that is created and destroyed for testing.
 	// To prevent errors when tests run in environments with CertManager already installed,

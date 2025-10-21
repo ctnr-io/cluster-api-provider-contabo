@@ -103,7 +103,7 @@ type ContaboClusterInitializationStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Cluster",type="string",JSONPath=".metadata.labels.cluster\\.x-k8s\\.io/cluster-name",description="Cluster to which this ContaboCluster belongs"
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.ready",description="Cluster infrastructure is ready"
-// +kubebuilder:printcolumn:name="Private Networks",type="string",JSONPath=".status.privateNetwork.name",description="Private Networks"
+// +kubebuilder:printcolumn:name="Private Network",type="string",JSONPath=".status.privateNetwork.name",description="Private Network"
 // +kubebuilder:printcolumn:name="Endpoint",type="string",JSONPath=".spec.controlPlaneEndpoint.host",description="API Endpoint",priority=1
 // +kubebuilder:resource:path=contaboclusters,scope=Namespaced,categories=cluster-api
 // +kubebuilder:storageversion
