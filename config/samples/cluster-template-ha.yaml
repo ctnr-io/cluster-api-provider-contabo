@@ -78,8 +78,9 @@ spec:
   template:
     spec:
       instance:
-        productId: ${CONTABO_CONTROL_PLANE_MACHINE_TYPE:=V45}
-        provisioningType: ReuseOrCreate
+        name: "${CONTROL_PLANE_MACHINE_NAME:=}"
+        productId: ${CONTROL_PLANE_MACHINE_TYPE:=V45}
+        provisioningType: ${CONTROL_PLANE_PROVISIONING_TYPE:=ReuseOnly} 
 ---
 apiVersion: cluster.x-k8s.io/v1beta1
 kind: MachineDeployment
@@ -118,8 +119,8 @@ spec:
   template:
     spec:
       instance:
-        productId: ${CONTABO_WORKER_MACHINE_TYPE:=V45}
-        provisioningType: ReuseOrCreate
+        productId: ${WORKER_MACHINE_TYPE:=V45}
+        provisioningType: ${WORKER_PROVISIONING_TYPE:=ReuseOnly}
 ---
 apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
 kind: KubeadmConfigTemplate

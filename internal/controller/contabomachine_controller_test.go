@@ -46,12 +46,17 @@ var _ = Describe("ContaboMachine Controller", func() {
 			By("creating the custom resource for the Kind ContaboMachine")
 			err := k8sClient.Get(ctx, typeNamespacedName, contabomachine)
 			if err != nil && errors.IsNotFound(err) {
+				productId := "V45"
 				resource := &infrastructurev1beta2.ContaboMachine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: infrastructurev1beta2.ContaboMachineSpec{
+						Instance: infrastructurev1beta2.ContaboInstanceSpec{
+							ProductId: &productId,
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

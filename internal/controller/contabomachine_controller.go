@@ -252,29 +252,6 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 	return ctrl.Result{}, nil
 }
 
-func (r *ContaboMachineReconciler) triggerClusterReconciliation(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) {
-	log := logf.FromContext(ctx)
-
-	// Patch the ContaboCluster to trigger reconciliation
-	patchHelper, err := patch.NewHelper(contaboCluster, r.Client)
-	if err != nil {
-		log.Error(err, "failed to create patch helper for ContaboCluster", "contaboCluster", contaboCluster.Name)
-		return
-	}
-
-	// Add an annotation to trigger reconciliation
-	if contaboCluster.Annotations == nil {
-		contaboCluster.Annotations = make(map[string]string)
-	}
-	contaboCluster.Annotations["contabo.cluster.x-k8s.io/force-reconcile"] = time.Now().Format(time.RFC3339)
-
-	// Patch the ContaboCluster with the updated annotations
-	if err := patchHelper.Patch(ctx, contaboCluster); err != nil {
-		log.Error(err, "failed to patch ContaboCluster", "contaboCluster", contaboCluster.Name)
-		return
-	}
-}
-
 // setupContaboMachine handles initial machine setup and validation
 func (r *ContaboMachineReconciler) setupContaboMachine(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) ctrl.Result {
 	log := logf.FromContext(ctx)

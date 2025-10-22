@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 
 	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
 )
@@ -51,7 +52,15 @@ var _ = Describe("ContaboCluster Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: infrastructurev1beta2.ContaboClusterSpec{
+						ControlPlaneEndpoint: clusterv1.APIEndpoint{
+							Host: "10.0.0.100",
+							Port: 6443,
+						},
+						PrivateNetwork: infrastructurev1beta2.ContaboPrivateNetworkSpec{
+							Region: "EU",
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
