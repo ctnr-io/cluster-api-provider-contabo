@@ -28,7 +28,7 @@ import (
 type ContaboClusterSpec struct {
 	// ControlPlaneEndpoint represents the endpoint used to communicate with the control plane.
 	// +optional
-	ControlPlaneEndpoint *clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty"`
+	ControlPlaneEndpoint clusterv1.APIEndpoint `json:"controlPlaneEndpoint"`
 
 	// PrivateNetwork specifies the private network configuration for the cluster.
 	PrivateNetwork ContaboPrivateNetworkSpec `json:"privateNetwork"`

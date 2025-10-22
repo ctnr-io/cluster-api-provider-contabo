@@ -129,6 +129,11 @@ var _ = BeforeSuite(func() {
 	// 	utils.UninstallCertManager()
 	// }
 
+	By("building the manager(Operator) image and loading into Kind")
+	cmd = exec.Command("make", "docker-build-kind", fmt.Sprintf("IMG=%s", projectImage))
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build and load the manager(Operator) image")
+
 	// The tests-e2e are intended to run on a temporary cluster that is created and destroyed for testing.
 	// To prevent errors when tests run in environments with CertManager already installed,
 	// we check for its presence before execution.

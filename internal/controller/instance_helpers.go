@@ -54,8 +54,9 @@ func (r *ContaboMachineReconciler) findReusableInstance(
 			Page:        &page,
 			Size:        &size,
 			DisplayName: &displayNameEmpty,
-			ProductIds:  &contaboMachine.Spec.Instance.ProductId,
+			ProductIds:  contaboMachine.Spec.Instance.ProductId,
 			Region:      &contaboCluster.Spec.PrivateNetwork.Region,
+			Name:        contaboMachine.Spec.Instance.Name,
 		})
 		if err != nil {
 			body := []byte{}
@@ -129,7 +130,7 @@ func (r *ContaboMachineReconciler) createNewInstance(
 		region := *ConvertRegionToCreateInstanceRegion(contaboCluster.Spec.PrivateNetwork.Region)
 
 		instanceCreateResp, err := r.ContaboClient.CreateInstanceWithResponse(ctx, &models.CreateInstanceParams{}, models.CreateInstanceRequest{
-			ProductId: &contaboMachine.Spec.Instance.ProductId,
+			ProductId: contaboMachine.Spec.Instance.ProductId,
 			Period:    1,
 			ImageId:   &imageId,
 			Region:    &region,

@@ -77,7 +77,5 @@ jobs:
           CONTABO_API_USER: ${{ secrets.CONTABO_API_USER }}
           CONTABO_API_PASSWORD: ${{ secrets.CONTABO_API_PASSWORD }}
         run: |
-          # Add e2e-test.contabo.cluster-api.ctnr.io to /etc/hosts
-          echo "127.0.0.1 test-cluster-apiserver.contabo-e2e-test.svc.cluster.local" | sudo tee -a /etc/hosts
           # Run tests with debug output
           make test-e2e GINKGO_ARGS="-v --trace" IMG=cluster-api-provider-contabo:latest

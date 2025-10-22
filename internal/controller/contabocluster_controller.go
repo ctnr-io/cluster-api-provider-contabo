@@ -428,24 +428,26 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Con
 
 	log.Info("Reconciling control plane endpoint for ContaboCluster", "cluster", contaboCluster.Name)
 
-	// First, create the control plane endpoint if not set
-	if contaboCluster.Spec.ControlPlaneEndpoint == nil {
-		// Service name must match the control plane endpoint host for DNS resolution
-		serviceName := fmt.Sprintf("%s-apiserver", contaboCluster.Name)
-		// Set control plane endpoint using the first control plane machine's IP
-		contaboCluster.Spec.ControlPlaneEndpoint = &clusterv1.APIEndpoint{
-			Host: serviceName,
-			Port: 6443, // Default Kubernetes API server port
-		}
-		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
-			Type:   clusterv1.ClusterControlPlaneAvailableCondition,
-			Status: metav1.ConditionTrue,
-			Reason: clusterv1.ClusterControlPlaneMachinesReadyReason,
-		})
-		log.Info("Using control plane endpoint", "controlPlaneEndpoint", contaboCluster.Spec.ControlPlaneEndpoint)
-	} else {
-		log.Info("Control plane endpoint already set", "controlPlaneEndpoint", contaboCluster.Spec.ControlPlaneEndpoint)
-	}
+	// // First, create the control plane endpoint if not set
+	// if contaboCluster.Spec.ControlPlaneEndpoint == nil {
+	// 	// Service name must match the control plane endpoint host for DNS resolution
+	// 	serviceName := fmt.Sprintf("%s-apiserver", contaboCluster.Name)
+	// 	// Set control plane endpoint using the first control plane machine's IP
+	// 	contaboCluster.Spec.ControlPlaneEndpoint = &clusterv1.APIEndpoint{
+	// 		Host: serviceName,
+	// 		Port: 6443, // Default Kubernetes API server port
+	// 	}
+
+	// 	log.Info("Using control plane endpoint", "controlPlaneEndpoint", contaboCluster.Spec.ControlPlaneEndpoint)
+	// } else {
+	// 	log.Info("Control plane endpoint already set", "controlPlaneEndpoint", contaboCluster.Spec.ControlPlaneEndpoint)
+	// }
+
+	meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+		Type:   clusterv1.ClusterControlPlaneAvailableCondition,
+		Status: metav1.ConditionTrue,
+		Reason: clusterv1.ClusterControlPlaneMachinesReadyReason,
+	})
 
 	// Retrieve control plane endpoint from the first ContaboMachine in the cluster
 	controlPlaneMachines := &infrastructurev1beta2.ContaboMachineList{}
@@ -623,11 +625,6 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpointSlices(ctx conte
 
 func (r *ContaboClusterReconciler) deleteControlPlaneService(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
 	log := logf.FromContext(ctx)
-
-	// If control plane endpoint was never set, nothing to delete
-	if contaboCluster.Spec.ControlPlaneEndpoint == nil {
-		return nil
-	}
 
 	// Service name matches the control plane endpoint host
 	serviceName := fmt.Sprintf("%s-apiserver", contaboCluster.Name)

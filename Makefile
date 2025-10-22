@@ -1,13 +1,5 @@
--include .env
-
-# Export Contabo credentials from .env file
-export CONTABO_CLIENT_ID
-export CONTABO_CLIENT_SECRET
-export CONTABO_API_USER
-export CONTABO_API_PASSWORD
-
 # Image URL to use all building/pushing image targets
-IMG ?= cluster-api-provider-contabo:latest
+IMG ?= ghcr.io/ctnr-io/cluster-api-provider-contabo:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -83,8 +75,6 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 # - CERT_MANAGER_INSTALL_SKIP=true
 KIND_CLUSTER ?= cluster-api-provider-contabo-test-e2e
 
-CONTABO_E2E_TEST_HOSTNAME := test-cluster-apiserver.contabo-e2e-test.svc.cluster.local
-
 .PHONY: setup-test-e2e
 setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 	@command -v $(KIND) >/dev/null 2>&1 || { \
@@ -98,57 +88,12 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
 			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
 	esac
-	@echo "Kind cluster ready for e2e tests"
 
 .PHONY: test-e2e
-test-e2e: setup-test-e2e manifests generate fmt vet clusterctl cilium docker-build-kind ## Run the e2e tests. Expected an isolated environment using Kind.
-	@echo "Preparing kubeconfig for e2e tests..."
+test-e2e: setup-test-e2e manifests generate fmt vet clusterctl cilium ## Run the e2e tests. Expected an isolated environment using Kind.
 	$(KIND) get kubeconfig --name $(KIND_CLUSTER) > test/fixtures/kubeconfig.yaml
-
-	@echo "Building e2e test runner image..."
-	$(CONTAINER_TOOL) build -t capc-e2e-runner:local -f test/e2e/Dockerfile .
-
-	@echo "Loading e2e test runner image into Kind cluster..."
-	$(KIND) load docker-image capc-e2e-runner:local --name $(KIND_CLUSTER)
-
-	@echo "Cleaning up previous e2e test resources..."
-	@kubectl delete namespace contabo-e2e-test --ignore-not-found=true --wait
-
-	@echo "Creating namespace for e2e tests..."
-	@kubectl create namespace contabo-e2e-test --dry-run=client -o yaml | kubectl apply -f -
-
-	@echo "Setting up ServiceAccount and RBAC for e2e test pod..."
-	@kubectl create serviceaccount capc-e2e-runner -n contabo-e2e-test --dry-run=client -o yaml | kubectl apply -f -
-	@kubectl create clusterrolebinding capc-e2e-runner-admin \
-		--clusterrole=cluster-admin \
-		--serviceaccount=contabo-e2e-test:capc-e2e-runner \
-		--dry-run=client -o yaml | kubectl apply -f -
-
-	@echo "Running e2e tests inside Kind cluster..."
-	@kubectl delete pod capc-e2e-runner -n contabo-e2e-test --ignore-not-found=true || true
-	@kubectl run capc-e2e-runner \
-		-it \
-		-n contabo-e2e-test \
-		--image=capc-e2e-runner:local \
-		--image-pull-policy=Never \
-		--restart=Never \
-		--overrides='{"spec":{"serviceAccountName":"capc-e2e-runner"}}' \
-		--env="KIND=$(KIND)" \
-		--env="KIND_CLUSTER=$(KIND_CLUSTER)" \
-		--env="CLUSTERCTL=clusterctl" \
-		--env="CONTABO_CLIENT_ID=$${CONTABO_CLIENT_ID}" \
-		--env="CONTABO_CLIENT_SECRET=$${CONTABO_CLIENT_SECRET}" \
-		--env="CONTABO_API_USER=$${CONTABO_API_USER}" \
-		--env="CONTABO_API_PASSWORD=$${CONTABO_API_PASSWORD}" \
-		--command -- sh -c "go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 20m"
-
-	@echo "Checking test results..."
-	@TEST_EXIT_CODE=$$(kubectl get pod capc-e2e-runner -n contabo-e2e-test -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}' 2>/dev/null || echo "1"); \
-
-	echo "Test exit code: $$TEST_EXIT_CODE"; \
-	kubectl delete pod capc-e2e-runner -n contabo-e2e-test --ignore-not-found=true || true; \
-
-	exit $$TEST_EXIT_CODE
+	KUBECONFIG=test/fixtures/kubeconfig.yaml KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) CLUSTERCTL=$(CLUSTERCTL) dotenvx run -- go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 20m
+# 	cleanup-test-e2e
 
 .PHONY: test-e2e.re
 test-e2e.re: cleanup-test-e2e
@@ -165,7 +110,6 @@ dev-redeploy: docker-build-kind ## Rebuild image, load to kind, and redeploy for
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
-	@kubectl delete pod capc-e2e-runner -n contabo-e2e-test --ignore-not-found=true || true
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
 
 .PHONY: lint
@@ -293,9 +237,6 @@ GOLANGCI_LINT_VERSION ?= v2.3.0
 CLUSTERCTL_VERSION ?= v1.11.1
 CILIUM_CLI_VERSION ?= $(shell curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
 
-.PHONY: install-tools
-install-tools: kustomize controller-gen clusterctl cilium ## Install required tools.
-	@echo "All tools installed in $(LOCALBIN)"
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -348,9 +289,10 @@ $(CLUSTERCTL): $(LOCALBIN)
 .PHONY: cilium
 cilium: $(CILIUM) ## Download cilium CLI locally if necessary.
 $(CILIUM):
-	curl -L --fail --remote-name-all https://github.com/cilium/cilium-cli/releases/download/$(CILIUM_CLI_VERSION)/cilium-$(OS)-$(ARCH).tar.gz
-	tar xzvf cilium-$(OS)-$(ARCH).tar.gz -C $(LOCALBIN)
-	rm cilium-$(OS)-$(ARCH).tar.gz
+	curl -L --fail --remote-name-all https://github.com/cilium/cilium-cli/releases/download/$(CILIUM_CLI_VERSION)/cilium-$(OS)-$(ARCH).tar.gz{,.sha256sum}
+	sha256sum --check cilium-$(OS)-$(ARCH).tar.gz.sha256sum
+	tar xzvfC cilium-$(OS)-$(ARCH).tar.gz $(LOCALBIN)
+	rm cilium-$(OS)-$(ARCH).tar.gz{,.sha256sum}
 	touch $(CILIUM)
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist

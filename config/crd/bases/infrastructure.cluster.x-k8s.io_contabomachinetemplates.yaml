@@ -57,6 +57,10 @@ spec:
                       instance:
                         description: Instance is the type of instance to create.
                         properties:
+                          name:
+                            description: Name will force the controller to chooose
+                              an instance with the specified name
+                            type: string
                           productId:
                             description: ProductID is the Contabo product ID (instance
                               type)

@@ -118,9 +118,14 @@ const (
 
 // ContaboInstanceSpec defines the desired state of a Contabo instance
 type ContaboInstanceSpec struct {
+	// Name will force the controller to chooose an instance with the specified name
+	// +optional
+	Name *string `json:"name,omitempty"`
+
 	// ProductID is the Contabo product ID (instance type)
 	// +kubebuilder:validation:Required
-	ProductId string `json:"productId"`
+	ProductId *string `json:"productId,omitempty"`
+
 	// Field to know if should create a new instance or reuse an existing one
 	// +optional
 	ProvisioningType *ContaboInstanceProvisioningType `json:"provisioningType,omitempty"`

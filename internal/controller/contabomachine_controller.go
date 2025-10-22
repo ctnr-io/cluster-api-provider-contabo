@@ -232,11 +232,6 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 		}
 	}
 
-	// Wait for the cluster to have its control plane endpoint host initialized before generating CABPK's bootstrap data
-	if result := r.waitForClusterControlPlaneEndpoint(ctx, contaboCluster); result.RequeueAfter > 0 {
-		return result, nil
-	}
-
 	// Set ContaboMachine ready for bootstrap data to be available by CABPK
 	contaboMachine.Status.Ready = true
 
@@ -255,20 +250,6 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 
 	// ContaboMachine is ready
 	return ctrl.Result{}, nil
-}
-
-// wait for the cluster to have its control plane endpoint host initialized
-func (r *ContaboMachineReconciler) waitForClusterControlPlaneEndpoint(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) ctrl.Result {
-	log := logf.FromContext(ctx)
-
-	if contaboCluster.Spec.ControlPlaneEndpoint == nil {
-		log.Info("Waiting for contabo cluster control plane endpoint to be initialized", "contaboCluster", contaboCluster.Name)
-		// Trigger cluster reconciliation
-		r.triggerClusterReconciliation(ctx, contaboCluster)
-		return ctrl.Result{RequeueAfter: 15 * time.Second}
-	}
-
-	return ctrl.Result{}
 }
 
 func (r *ContaboMachineReconciler) triggerClusterReconciliation(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) {

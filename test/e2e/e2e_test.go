@@ -341,6 +341,13 @@ var _ = Describe("Manager", Ordered, func() {
 			}, 120*time.Second, 10*time.Second).ShouldNot(BeEmpty())
 		}
 
+		BeforeEach(func() {
+			By("cleaning up test resources")
+			kubectl("delete", "namespace", testNamespace, "--ignore-not-found=true", "--timeout=60s")
+			By("creating test namespace")
+			kubectl("create", "namespace", testNamespace)
+		})
+
 		It("creates ContaboCluster and control plane with V76 product", func() {
 			clusterManifest, err := os.ReadFile("test/fixtures/cluster.yaml")
 			if err != nil {
@@ -456,9 +463,10 @@ var _ = Describe("Manager", Ordered, func() {
 			}, 10*time.Minute, 5*time.Second).Should(Equal("true"))
 
 			By("verifying control plane endpoint is set")
+			var controlPlaneEndpointHost string
 			Eventually(func() string {
 				output, _ := kubectl("get", "contabocluster", "test-cluster", "-n", testNamespace, "-o", "jsonpath={.spec.controlPlaneEndpoint.host}")
-				controlPlaneEndpointHost := strings.TrimSpace(output)
+				controlPlaneEndpointHost = strings.TrimSpace(output)
 				return controlPlaneEndpointHost
 			}, 30*time.Second, 5*time.Second).ShouldNot(BeEmpty())
 
@@ -589,7 +597,7 @@ var _ = Describe("Manager", Ordered, func() {
 
 			By("verifying control plane endpoint Service is deleted")
 			Eventually(func() error {
-				_, err := kubectl("get", "service", serviceName, "-n", testNamespace)
+				_, err := kubectl("get", "service", controlPlaneEndpointHost, "-n", testNamespace)
 				return err
 			}, 2*time.Minute, 5*time.Second).ShouldNot(Succeed())
 
