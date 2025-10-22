@@ -123,7 +123,7 @@ type ContaboInstanceSpec struct {
 	Name *string `json:"name,omitempty"`
 
 	// ProductID is the Contabo product ID (instance type)
-	// +kubebuilder:validation:Required
+	// +optional
 	ProductId *string `json:"productId,omitempty"`
 
 	// Field to know if should create a new instance or reuse an existing one

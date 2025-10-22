@@ -35,9 +35,9 @@ spec:
       jsonPath: .status.ready
       name: Ready
       type: string
-    - description: Private Networks
+    - description: Private Network
       jsonPath: .status.privateNetwork.name
-      name: Private Networks
+      name: Private Network
       type: string
     - description: API Endpoint
       jsonPath: .spec.controlPlaneEndpoint.host
@@ -463,6 +463,10 @@ spec:
               instance:
                 description: Instance is the type of instance to create.
                 properties:
+                  name:
+                    description: Name will force the controller to chooose an instance
+                      with the specified name
+                    type: string
                   productId:
                     description: ProductID is the Contabo product ID (instance type)
                     type: string
@@ -910,6 +914,10 @@ spec:
                       instance:
                         description: Instance is the type of instance to create.
                         properties:
+                          name:
+                            description: Name will force the controller to chooose
+                              an instance with the specified name
+                            type: string
                           productId:
                             description: ProductID is the Contabo product ID (instance
                               type)
@@ -1221,6 +1229,18 @@ rules:
   - update
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - cluster.x-k8s.io
   resources:
   - clusters
@@ -1230,6 +1250,18 @@ rules:
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - infrastructure.cluster.x-k8s.io

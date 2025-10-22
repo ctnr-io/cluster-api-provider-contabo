@@ -61,7 +61,7 @@ spec:
   template:
     spec:
       instance:
-        name: "${CONTROL_PLANE_MACHINE_NAME:=}"
+        name: ${CONTROL_PLANE_MACHINE_NAME:=}
         productId: ${CONTROL_PLANE_MACHINE_TYPE:=V45}
         provisioningType: ${CONTROL_PLANE_PROVISIONING_TYPE:=ReuseOnly} 
 ---
