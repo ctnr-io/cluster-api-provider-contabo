@@ -69,8 +69,6 @@ spec:
                             description: Field to know if should create a new instance
                               or reuse an existing one
                             type: string
-                        required:
-                        - productId
                         type: object
                       providerID:
                         description: ProviderID is the unique identifier as specified
