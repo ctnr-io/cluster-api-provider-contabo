@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -63,6 +64,8 @@ type ContaboMachineReconciler struct {
 	Scheme        *runtime.Scheme
 	Recorder      record.EventRecorder
 	ContaboClient *contaboclient.ClientWithResponses
+	// instanceReuseMutex protects against concurrent instance reuse
+	instanceReuseMutex sync.Mutex
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=contabomachines,verbs=get;list;watch;create;update;patch;delete
@@ -417,6 +420,10 @@ func (r *ContaboMachineReconciler) provisionInstance(ctx context.Context, contab
 func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
+	// Use mutex to prevent concurrent instance reuse
+	r.instanceReuseMutex.Lock()
+	defer r.instanceReuseMutex.Unlock()
+
 	// Try to find existing instance
 	instance, err := r.getExistingInstance(ctx, contaboMachine, contaboCluster)
 	if err != nil {
@@ -431,6 +438,7 @@ func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, con
 	if instance != nil {
 		contaboMachine.Status.Instance = instance
 		log.Info("Found existing instance", "instanceID", instance.InstanceId)
+		return ctrl.Result{}, nil
 	}
 
 	// Look for reusable instance if none found
@@ -447,12 +455,16 @@ func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, con
 
 	// Create new instance if none found and provisioning type allows
 	if contaboMachine.Status.Instance == nil {
-		err = r.createNewInstance(ctx, contaboMachine, contaboCluster)
+		instance, err = r.createNewInstance(ctx, contaboMachine, contaboCluster)
 		if err != nil {
-			return ctrl.Result{}, err
+			log.Error(err, "Failed to create new instance")
+			// Do not return error to avoid requeue storm, it would permit to create multiple instances rapidly
+			return ctrl.Result{}, nil
 		}
-		// Force requeue to retrieve instance via display name
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		if instance != nil {
+			contaboMachine.Status.Instance = instance
+			log.Info("Created new instance", "instanceID", instance.InstanceId)
+		}
 	}
 
 	// Update instance state (display name and networking)
@@ -466,7 +478,8 @@ func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, con
 		)
 	}
 
-	return ctrl.Result{}, nil
+	// Force requeue to retrieve instance via display name
+	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
 // validateInstanceStatus validates the instance status and handles error conditions

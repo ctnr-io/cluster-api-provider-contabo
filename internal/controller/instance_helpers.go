@@ -110,16 +110,16 @@ func (r *ContaboMachineReconciler) createNewInstance(
 	ctx context.Context,
 	contaboMachine *infrastructurev1beta2.ContaboMachine,
 	contaboCluster *infrastructurev1beta2.ContaboCluster,
-) error {
+) (*infrastructurev1beta2.ContaboInstanceStatus, error) {
 	log := logf.FromContext(ctx)
 
 	// Check provisioning type
 	switch {
 	case contaboMachine.Spec.Instance.ProvisioningType == nil:
-		return nil // No provisioning type specified
+		return nil, fmt.Errorf("no provisioning type specified")
 	case *contaboMachine.Spec.Instance.ProvisioningType == infrastructurev1beta2.ContaboInstanceProvisioningTypeReuseOnly:
 		log.Info("No reusable instance found in Contabo API, user must intervene")
-		return nil
+		return nil, fmt.Errorf("no reusable instance found for reuse-only provisioning type")
 	case *contaboMachine.Spec.Instance.ProvisioningType == infrastructurev1beta2.ContaboInstanceProvisioningTypeReuseOrCreate:
 		log.Info("No reusable instance found in Contabo API, will create a new one",
 			"productID", contaboMachine.Spec.Instance.ProductId,
@@ -144,16 +144,23 @@ func (r *ContaboMachineReconciler) createNewInstance(
 			log.Error(err, "Failed to create instance in Contabo API",
 				"statusCode", instanceCreateResp.StatusCode(),
 				"body", string(instanceCreateResp.Body))
-			return fmt.Errorf("failed to create instance: %w", err)
+			return nil, fmt.Errorf("failed to create instance: %w", err)
 		}
 
 		instanceId := instanceCreateResp.JSON201.Data[0].InstanceId
 		log.Info("Created new instance in Contabo API",
 			"instanceID", instanceId)
 
-		return nil
+		retrieveInstanceResponse, err := r.ContaboClient.RetrieveInstanceWithResponse(ctx, instanceId, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to retrieve newly created instance: %w", err)
+		}
+
+		instance := convertInstanceResponseData(&retrieveInstanceResponse.JSON200.Data[0])
+
+		return instance, nil
 	default:
-		return fmt.Errorf("unknown Instance provisioningType: %v", contaboMachine.Spec.Instance.ProvisioningType)
+		return nil, fmt.Errorf("unknown Instance provisioningType: %v", contaboMachine.Spec.Instance.ProvisioningType)
 	}
 }
 
