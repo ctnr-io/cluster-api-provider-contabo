@@ -11,6 +11,26 @@ spec:
   privateNetwork:
     region: EU
 ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-cluster-encryption-key
+  namespace: contabo-e2e-test
+type: Opaque
+stringData:
+  encryption-config: |
+    apiVersion: apiserver.config.k8s.io/v1
+    kind: EncryptionConfiguration
+    resources:
+      - resources:
+          - secrets
+        providers:
+          - secretbox:
+              keys:
+                - name: secretbox-key-0
+                  secret: YzJWamNtVjBJR2x6SUhObFkzVnlaUT09Cg==
+          - identity: {}
+---
 apiVersion: cluster.x-k8s.io/v1beta2
 kind: Cluster
 metadata:
@@ -59,6 +79,25 @@ spec:
       kind: ContaboMachineTemplate
       apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
       name: test-control-plane
+  kubeadmConfigSpec:
+    clusterConfiguration:
+      apiServer:
+        extraArgs:
+          encryption-provider-config: /etc/kubernetes/encryption-config.yaml
+        extraVolumes:
+          - name: encryption-config
+            hostPath: /etc/kubernetes/encryption-config.yaml
+            mountPath: /etc/kubernetes/encryption-config.yaml
+            readOnly: true
+            pathType: File
+    files:
+      - path: /etc/kubernetes/encryption-config.yaml
+        owner: root:root
+        permissions: "0600"
+        contentFrom:
+          secret:
+            name: test-cluster-encryption-key
+            key: encryption-config
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ContaboMachineTemplate

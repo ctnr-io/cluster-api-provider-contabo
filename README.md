@@ -269,6 +269,58 @@ The authentication flow automatically obtains access tokens from:
 https://auth.contabo.com/auth/realms/contabo/protocol/openid-connect/token
 ```
 
+### Encryption at Rest
+
+The provider templates include support for encrypting Kubernetes secrets at rest using the API server's encryption configuration. The encryption key is stored securely in a Kubernetes Secret in the management cluster, separate from the cluster manifest.
+
+**Encryption Provider:**
+
+The templates use **`secretbox`** encryption provider (based on NaCl/libsodium), which is the recommended option for local key-based encryption. It provides:
+- Modern authenticated encryption (AEAD)
+- Better security than `aescbc` (vulnerable to padding oracle attacks) 
+- Better security than `aesgcm` (vulnerable to nonce reuse in Kubernetes)
+- Simple implementation with 32-byte keys
+
+For production environments, consider using a **KMS provider** for envelope encryption with external key management.
+
+**Generating an encryption key:**
+
+```sh
+# Generate a random 32-byte encryption key and encode it in base64
+export ENCRYPTION_KEY=$(head -c 32 /dev/urandom | base64)
+```
+
+**Using the encryption key in cluster templates:**
+
+When using `clusterctl generate cluster`, the template will create a Secret containing the encryption configuration. Pass the encryption key as an environment variable:
+
+```sh
+export ENCRYPTION_KEY=$(head -c 32 /dev/urandom | base64)
+
+clusterctl generate cluster $CLUSTER_NAME \
+  --infrastructure contabo \
+  --kubernetes-version $KUBERNETES_VERSION \
+  --control-plane-machine-count $CONTROL_PLANE_MACHINE_COUNT \
+  --worker-machine-count $WORKER_MACHINE_COUNT \
+  > $CLUSTER_NAME.yaml
+
+kubectl apply -f $CLUSTER_NAME.yaml
+```
+
+The template creates a Secret named `${CLUSTER_NAME}-encryption-key` that contains the full encryption configuration. The KubeadmControlPlane references this secret using `contentFrom.secret`, ensuring:
+- The encryption key is not stored in plain text in the manifest
+- The secret can be backed up and managed separately
+- Key rotation can be performed by updating the secret
+
+**Important notes:**
+- All control plane nodes in a cluster automatically use the same encryption key from the shared Secret
+- Store a backup of the encryption key securely - losing it means you cannot decrypt your secrets
+- The encryption configuration is automatically applied to all control plane nodes via kubeadm
+- For production clusters, consider using a KMS provider instead of local encryption keys
+- To rotate keys, update the Secret and restart the API servers (see Kubernetes documentation for details)
+
+See the Kubernetes documentation on [Encrypting Confidential Data at Rest](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/) for more details.
+
 See the Contabo documentation for current specifications and pricing.
 
 ## Project Distribution

@@ -18,6 +18,26 @@ spec:
     apiVersion: controlplane.cluster.x-k8s.io/v1beta1
     name: "${CLUSTER_NAME}-control-plane"
 ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ${CLUSTER_NAME}-encryption-key
+  namespace: ${NAMESPACE:=default}
+type: Opaque
+stringData:
+  encryption-config: |
+    apiVersion: apiserver.config.k8s.io/v1
+    kind: EncryptionConfiguration
+    resources:
+      - resources:
+          - secrets
+        providers:
+          - secretbox:
+              keys:
+                - name: secretbox-key-0
+                  secret: ${ENCRYPTION_KEY}
+          - identity: {}
+---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ContaboCluster
 metadata:
@@ -42,6 +62,9 @@ spec:
       apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
       name: "${CLUSTER_NAME}-control-plane"
   kubeadmConfigSpec:
+    initConfiguration:
+      skipPhases:
+      - addon/kube-proxy
     clusterConfiguration:
       apiServer:
         certSANs:
@@ -52,6 +75,22 @@ spec:
           - "${CLUSTER_NAME}-apiserver.${NAMESPACE}.svc.cluster.local"
           # Also add the external hostname if configured
           - "${CONTROL_PLANE_ENDPOINT_HOST}"
+        extraArgs:
+          encryption-provider-config: /etc/kubernetes/encryption-config.yaml
+        extraVolumes:
+          - name: encryption-config
+            hostPath: /etc/kubernetes/encryption-config.yaml
+            mountPath: /etc/kubernetes/encryption-config.yaml
+            readOnly: true
+            pathType: File
+    files:
+      - path: /etc/kubernetes/encryption-config.yaml
+        owner: root:root
+        permissions: "0600"
+        contentFrom:
+          secret:
+            name: ${CLUSTER_NAME}-encryption-key
+            key: encryption-config
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: ContaboMachineTemplate
@@ -112,14 +151,6 @@ apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
 kind: KubeadmConfigTemplate
 metadata:
   name: "${CLUSTER_NAME}-md-0"
-spec:
-  template:
-    spec:
-      joinConfiguration:
-        nodeRegistration:
-          name: '{{ ds.meta_data.hostname }}'
-          kubeletExtraArgs:
-            cloud-provider: external
 ---
 apiVersion: cluster.x-k8s.io/v1beta1
 kind: MachineHealthCheck
@@ -146,28 +177,29 @@ spec:
 apiVersion: addons.cluster.x-k8s.io/v1alpha1
 kind: HelmChartProxy
 metadata:
-  name: cluster-autoscaler
+  name: ${CLUSTER_NAME}-autoscaler
 spec:
   clusterSelector:
     matchLabels:
       cluster.x-k8s.io/cluster-name: ${CLUSTER_NAME}
   repoURL: https://kubernetes.github.io/autoscaler
   chartName: cluster-autoscaler
-  version: ${CLUSTER_AUTOSCALER_VERSION:=9.29.3}
+  version: ${CLUSTER_AUTOSCALER_VERSION:=9.52.1}
   namespace: kube-system
   releaseName: cluster-autoscaler
   valuesTemplate: |
     autoDiscovery:
-      clusterName: {{ .Cluster.metadata.name }}
+      clusterName: ${CLUSTER_NAME}
     
     cloudProvider: clusterapi
-    clusterAPIMode: kubeconfig-kubeconfig
-    clusterAPIKubeconfigSecret: cluster-autoscaler-kubeconfig
-    clusterAPICloudConfigPath: /etc/kubernetes/mgmt-kubeconfig
+    # Running in management cluster, use in-cluster config for CAPI resources
+    # Connect to workload cluster via kubeconfig secret
+    clusterAPIMode: kubeconfig-incluster
+    clusterAPIKubeconfigSecret: ${CLUSTER_NAME}-kubeconfig
     
     extraArgs:
       balance-similar-node-groups: true
-      scale-down-enabled: true
+      scale-down-enabled: false
       scale-down-delay-after-add: 1m
       scale-down-unneeded-time: 1m
       scale-down-utilization-threshold: 0.5
@@ -186,26 +218,7 @@ spec:
     
     rbac:
       create: true
+      clusterScoped: true
       serviceAccount:
         create: true
         name: cluster-autoscaler
----
-# Secret containing management cluster kubeconfig
-# This will be created by CAPI Helm addon and contains credentials to scale MachineDeployments
-apiVersion: v1
-kind: Secret
-metadata:
-  name: cluster-autoscaler-kubeconfig
-  namespace: ${CLUSTER_NAMESPACE:=default}
-type: addons.cluster.x-k8s.io/resource-set
-stringData:
-  value: |
-    apiVersion: v1
-    kind: Secret
-    metadata:
-      name: cluster-autoscaler-kubeconfig
-      namespace: kube-system
-    type: Opaque
-    stringData:
-      kubeconfig: |
-        {{ .BootstrapKubeconfig | indent 8 }}
