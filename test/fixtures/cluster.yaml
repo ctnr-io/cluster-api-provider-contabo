@@ -28,7 +28,7 @@ stringData:
           - secretbox:
               keys:
                 - name: secretbox-key-0
-                  secret: YzJWamNtVjBJR2x6SUhObFkzVnlaUT09Cg==
+                  secret: yI9EOaNXPno3PZh4z15DB2lB4HcXz0LaF3ZrndIOx+E=
           - identity: {}
 ---
 apiVersion: cluster.x-k8s.io/v1beta2
