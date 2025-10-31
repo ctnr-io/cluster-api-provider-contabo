@@ -55,8 +55,10 @@ import (
 	_ "embed"
 )
 
-//go:embed templates/cloud-config.yaml
-var cloudconfig string
+//go:embed templates/controlplane.cloud-config.yaml
+var controlplaneCloudConfig string
+//go:embed templates/worker.cloud-config.yaml
+var workerCloudConfig string
 
 // ContaboMachineReconciler reconciles a ContaboMachine object
 type ContaboMachineReconciler struct {
@@ -356,8 +358,13 @@ func (r *ContaboMachineReconciler) getBootstrapData(ctx context.Context, machine
 		return "", ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
+	cloudConfig := workerCloudConfig
+	if contaboMachine.Labels[clusterv1.MachineControlPlaneLabel] != "false" {
+		cloudConfig = controlplaneCloudConfig
+	}
+
 	// Merge cloud-config with bootstrap data
-	mergedConfig, err := mergeCloudConfig([]byte(cloudconfig), bootstrapDataSecret.Data["value"])
+	mergedConfig, err := mergeCloudConfig([]byte(cloudConfig), bootstrapDataSecret.Data["value"])
 	if err != nil {
 		return "", ctrl.Result{}, r.handleError(
 			ctx,
