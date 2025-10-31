@@ -12,7 +12,7 @@ export const packages: Packages = [
   "gpg",
 ];
 
-export const writeFiles: WriteFiles = []; 
+export const writeFiles: WriteFiles = [];
 
 export const runcmd = [
   sh`

@@ -57,6 +57,7 @@ import (
 
 //go:embed templates/controlplane.cloud-config.yaml
 var controlplaneCloudConfig string
+
 //go:embed templates/worker.cloud-config.yaml
 var workerCloudConfig string
 
@@ -693,49 +694,8 @@ func (r *ContaboMachineReconciler) reconcilePrivateNetworkAssignment(ctx context
 			)
 		}
 
-		// // Reinstalling instance to be sure there are no issues with private network
-		// log.Info("Reinstalling instance to be sure there are no issues with private network",
-		// 	"instanceID", contaboMachine.Status.Instance.InstanceId)
-		// _, err = r.ContaboClient.ReinstallInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
-		// 	SshKeys: &[]int64{contaboCluster.Status.SshKey.SecretId},
-		// 	ImageId: contaboMachine.Status.Instance.ImageId,
-		// })
-		// if err != nil {
-		// 	return ctrl.Result{RequeueAfter: 30 * time.Second}, r.handleError(
-		// 		ctx,
-		// 		contaboMachine,
-		// 		err,
-		// 		infrastructurev1beta2.InstanceFailedReason,
-		// 		"Failed to reinstall instance after private network assignment",
-		// 	)
-		// }
-		// // Wait a bit before checking the instance status again
-		// time.Sleep(10 * time.Second)
-
 		// Requeue to wait for the instance to be fully restarted
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-
-		// Wait for instance to be fully restarted
-		// for {
-		// 	time.Sleep(10 * time.Second)
-		// 	instanceGetResp, err := r.ContaboClient.RetrieveInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, &models.RetrieveInstanceParams{})
-		// 	if err != nil || instanceGetResp.StatusCode() < 200 || instanceGetResp.StatusCode() >= 300 {
-		// 		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.handleError(
-		// 			ctx,
-		// 			contaboMachine,
-		// 			err,
-		// 			infrastructurev1beta2.InstanceFailedReason,
-		// 			"Failed to retrieve instance after reboot",
-		// 		)
-		// 	}
-		// 	if instanceGetResp.JSON200.Data[0].Status == models.InstanceStatusRunning {
-		// 		contaboMachine.Status.Instance = convertInstanceResponseData(&instanceGetResp.JSON200.Data[0])
-		// 		break
-		// 	}
-		// 	log.Info("Waiting for instance to be fully restarted",
-		// 		"instanceID", contaboMachine.Status.Instance.InstanceId,
-		// 		"currentStatus", contaboMachine.Status.Instance.Status)
-		// }
 	}
 
 	return ctrl.Result{}, nil
@@ -743,7 +703,9 @@ func (r *ContaboMachineReconciler) reconcilePrivateNetworkAssignment(ctx context
 
 // updateContaboMachineAddresses updates the ContaboMachine addresses based on private network assignment
 func (r *ContaboMachineReconciler) updateContaboMachineAddresses(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
-	// log := logf.FromContext(ctx)
+	log := logf.FromContext(ctx)
+
+	log.Info("Updating contabo machine addresses")
 
 	// Get the private network
 	privateNetworkGetResp, err := r.ContaboClient.RetrievePrivateNetworkWithResponse(ctx, contaboCluster.Status.PrivateNetwork.PrivateNetworkId, &models.RetrievePrivateNetworkParams{})
@@ -885,21 +847,54 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 
 		log.Info("cloud-init has finished on instance",
 			"instanceID", contaboMachine.Status.Instance.InstanceId)
-
 	}
+
+	if result, err := r.initializeNode(ctx, machine, contaboMachine, contaboCluster); err != nil || result.RequeueAfter > 0 {
+		return result, err
+	}
+
+	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.InstanceBootstrapCondition,
+		Status: metav1.ConditionTrue,
+		Reason: infrastructurev1beta2.InstanceBootstrapedReason,
+	})
+
+	// Update ContaboMachine status with instance details
+	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.InstanceReadyCondition,
+		Status: metav1.ConditionTrue,
+		Reason: infrastructurev1beta2.InstanceReadyReason,
+	})
+	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+		Type:   clusterv1.ReadyCondition,
+		Status: metav1.ConditionTrue,
+		Reason: clusterv1.ReadyReason,
+	})
+
+	log.Info("Instance is ready",
+		"instanceID", contaboMachine.Status.Instance.InstanceId,
+		"instanceIP", contaboMachine.Status.Instance.IpConfig.V4.Ip)
+
+	return ctrl.Result{}, nil
+}
+
+// initializeNode reinstalls instance with cloud-init bootstrap data
+func (r *ContaboMachineReconciler) initializeNode(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
 
 	// Configure node
 	// 1. Get the kubeconfig
 	// 2. Connect to cluster
-	// 3. Wait for node to exists
+	// 3. Wait for node to exists and be ready
 	// 4. Update node external IPs if not already set
 	// 5. Set Ready condition to true
+	// 6. Remove uninitialized taint
 	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
 		Type:   infrastructurev1beta2.InstanceBootstrapCondition,
 		Status: metav1.ConditionFalse,
 		Reason: infrastructurev1beta2.InstanceConfigureNodeReason,
 	})
-	condition = meta.FindStatusCondition(contaboMachine.Status.Conditions, infrastructurev1beta2.InstanceBootstrapCondition)
+	condition := meta.FindStatusCondition(contaboMachine.Status.Conditions, infrastructurev1beta2.InstanceBootstrapCondition)
 	if condition.Reason == infrastructurev1beta2.InstanceConfigureNodeReason {
 		log.Info("Waiting for node to exists in the cluster",
 			"instanceID", contaboMachine.Status.Instance.InstanceId,
@@ -941,82 +936,87 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 			log.Info("Node not found in cluster, kubelet seems not ready, will retry", "nodeName", nodeName)
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
+
+		// Find Ready condition
+		var readyCondition *corev1.NodeCondition
+		for _, cond := range node.Status.Conditions {
+			if cond.Type == corev1.NodeReady {
+				readyCondition = &cond
+				break
+			}
+		}
+		// Check if node is ready
+		if readyCondition == nil || readyCondition.Status != corev1.ConditionTrue {
+			log.Info("Node is not ready yet, will retry", "nodeName", nodeName)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+
 		log.Info("Node found in cluster, updating external ips",
 			"nodeName", nodeName,
 			"instanceID", contaboMachine.Status.Instance.InstanceId)
 
 		// Prepare complete address list including any missing external IPs
-		addresses := node.Status.Addresses
-		externalIPsToAdd := []corev1.NodeAddress{}
-
-		// Check which external IPs need to be added
+		addresses := []corev1.NodeAddress{}
 		for _, ip := range contaboMachine.Status.Addresses {
-			if ip.Type == clusterv1.MachineExternalIP {
-				hasIP := false
-				for _, addr := range addresses {
-					if addr.Type == corev1.NodeExternalIP && addr.Address == ip.Address {
-						hasIP = true
-						break
-					}
-				}
-				if !hasIP {
-					log.Info("Found missing external IP to add", "nodeName", nodeName, "ip", ip.Address)
-					externalIPsToAdd = append(externalIPsToAdd, corev1.NodeAddress{
-						Type:    corev1.NodeExternalIP,
-						Address: ip.Address,
-					})
-				}
-			}
+			addresses = append(addresses, corev1.NodeAddress{
+				Type:    corev1.NodeAddressType(ip.Type),
+				Address: ip.Address,
+			})
 		}
 
-		// Only patch if we have new IPs to add
-		if len(externalIPsToAdd) > 0 {
-			// Build complete address list
-			addresses = append(addresses, externalIPsToAdd...)
-
-			// Create patch with complete address list
-			patchNode := &corev1.Node{
-				Status: corev1.NodeStatus{
-					Addresses: addresses,
-				},
-			}
-
-			patchBytes, err := json.Marshal(patchNode)
-			if err != nil {
-				log.Error(err, "Failed to marshal node status patch")
-				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-			}
-
-			_, err = k8sClient.CoreV1().Nodes().Patch(ctx, nodeName, types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{}, "status")
-			if err != nil {
-				log.Error(err, "Failed to patch node with external IPs", "nodeName", nodeName)
-				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-			}
-			log.Info("Successfully patched node with external IPs", "nodeName", nodeName, "addedIPs", externalIPsToAdd)
+		// Create patch with complete address list
+		patchNode := &corev1.Node{
+			Status: corev1.NodeStatus{
+				Addresses: addresses,
+			},
 		}
+
+		patchBytes, err := json.Marshal(patchNode)
+		if err != nil {
+			log.Error(err, "Failed to marshal node status patch")
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+
+		log.Info("Patching node with IP addresses",
+			"nodeName", nodeName,
+			"ips", addresses)
+
+		_, err = k8sClient.CoreV1().Nodes().Patch(ctx, nodeName, types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{}, "status")
+		if err != nil {
+			log.Error(err, "Failed to patch node with external IPs", "nodeName", nodeName)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+
+		log.Info("Successfully patched node with IPs", "nodeName", nodeName, "ips", addresses)
+
+		// Remove unitialized taint if present
+		node, err = k8sClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				log.Info("Node not found in cluster yet, will retry", "nodeName", nodeName)
+				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+			}
+			log.Info("Node not found in cluster, kubelet seems not ready, will retry", "nodeName", nodeName)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+
+		taintRemoved := false
+		for i, taint := range node.Spec.Taints {
+			if taint.Key == "node.cloudprovider.kubernetes.io/uninitialized" {
+				node.Spec.Taints = append(node.Spec.Taints[:i], node.Spec.Taints[i+1:]...)
+				taintRemoved = true
+				break
+			}
+		}
+		if taintRemoved {
+			_, err = k8sClient.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
+			if err != nil {
+				log.Error(err, "Failed to initialize node", "nodeName", nodeName)
+				return ctrl.Result{}, fmt.Errorf("failed to initialize node %s: %w", nodeName, err)
+			}
+		}
+		log.Info("Successfully initialize node", "nodeName", nodeName)
 	}
-
-	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
-		Type:   infrastructurev1beta2.InstanceBootstrapCondition,
-		Status: metav1.ConditionTrue,
-		Reason: infrastructurev1beta2.InstanceBootstrapedReason,
-	})
-
-	// Update ContaboMachine status with instance details
-	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
-		Type:   infrastructurev1beta2.InstanceReadyCondition,
-		Status: metav1.ConditionTrue,
-		Reason: infrastructurev1beta2.InstanceReadyReason,
-	})
-	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
-		Type:   clusterv1.ReadyCondition,
-		Status: metav1.ConditionTrue,
-		Reason: clusterv1.ReadyReason,
-	})
-
-	log.Info("Instance is ready",
-		"instanceID", contaboMachine.Status.Instance.InstanceId,
-		"instanceIP", contaboMachine.Status.Instance.IpConfig.V4.Ip)
 
 	return ctrl.Result{}, nil
 }
@@ -1367,19 +1367,6 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, instance *
 	var err error
 	log := logf.FromContext(ctx)
 
-	displayName := ""
-	if instance.ErrorMessage != nil {
-		displayName = Truncate(fmt.Sprintf("[capc] %d %s", instance.InstanceId, *instance.ErrorMessage), 255) // Contabo display name max length is 255 characters
-	}
-	_, err = r.ContaboClient.PatchInstanceWithResponse(ctx, instance.InstanceId, nil, models.PatchInstanceRequest{
-		DisplayName: &displayName,
-	})
-	if err != nil {
-		log.Error(err, "Failed to update instance display name to avoid reuse",
-			"instanceID", instance.InstanceId,
-			"newDisplayName", displayName)
-	}
-
 	// TODO: code is ugly, needs refactoring
 	// Check if instance has any private networks assigned
 	if len(instance.AddOns) > 0 {
@@ -1410,15 +1397,8 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, instance *
 									log.Info("Successfully unassigned private network from instance",
 										"instanceID", instance.InstanceId,
 										"networkID", network.PrivateNetworkId)
-									// Restart
-									_, err = r.ContaboClient.Restart(ctx, instance.InstanceId, nil)
-									if err != nil {
-										log.Error(err, "Failed to reboot instance after unassigning private network",
-											"instanceID", instance.InstanceId)
-									} else {
-										log.Info("Rebooted instance after unassigning private network",
-											"instanceID", instance.InstanceId)
-									}
+									time.Sleep(1 * time.Second)
+
 								} else {
 									log.Error(err, "Failed to unassign private network from instance",
 										"instanceID", instance.InstanceId,
@@ -1433,6 +1413,34 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, instance *
 			}
 		}
 	}
+
+	displayName := ""
+	if instance.ErrorMessage != nil {
+		displayName = Truncate(fmt.Sprintf("[capc] %d %s", instance.InstanceId, *instance.ErrorMessage), 255) // Contabo display name max length is 255 characters
+	}
+	_, err = r.ContaboClient.PatchInstanceWithResponse(ctx, instance.InstanceId, nil, models.PatchInstanceRequest{
+		DisplayName: &displayName,
+	})
+	if err != nil {
+		log.Error(err, "Failed to update instance display name to avoid reuse",
+			"instanceID", instance.InstanceId,
+			"newDisplayName", displayName)
+	}
+
+	time.Sleep(1 * time.Second) // Wait a bit to ensure unassignment is processed
+
+	// Restart
+	_, err = r.ContaboClient.Restart(ctx, instance.InstanceId, nil)
+	if err != nil {
+		log.Error(err, "Failed to reboot instance after unassigning private network",
+			"instanceID", instance.InstanceId)
+	} else {
+		log.Info("Rebooted instance after unassigning private network",
+			"instanceID", instance.InstanceId)
+	}
+
+	time.Sleep(5 * time.Second) // Wait a bit to ensure reboot is processed
+
 	return err
 }
 

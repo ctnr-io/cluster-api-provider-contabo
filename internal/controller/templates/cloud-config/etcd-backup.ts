@@ -14,9 +14,9 @@ export const writeFiles = [
     owner: "root:root",
     permissions: "0644",
     content: tag("cron")`
-			# Daily etcd backup at midnight
-			0 0 * * * root /usr/local/bin/etcd-backup.sh > /var/log/etcd-backup.log 2>&1
-		`,
+      # Daily etcd backup at midnight
+      0 0 * * * root /usr/local/bin/etcd-backup.sh > /var/log/etcd-backup.log 2>&1
+    `,
   },
   // Etcd backup script
   {
@@ -24,31 +24,28 @@ export const writeFiles = [
     owner: "root:root",
     permissions: "0755",
     content: sh`
-			#!/bin/bash
-			set -euo pipefail
+      BACKUP_DIR="${etcdBackupDir}"
+      BACKUP_DATE=$(date +%Y%m%d-%H%M%S)
+      BACKUP_FILE="$BACKUP_DIR/etcd-snapshot-$BACKUP_DATE.db"
 
-			BACKUP_DIR="${etcdBackupDir}"
-			BACKUP_DATE=$(date +%Y%m%d-%H%M%S)
-			BACKUP_FILE="$BACKUP_DIR/etcd-snapshot-$BACKUP_DATE.db"
+      # Create backup directory if it doesn't exist
+      mkdir -p $BACKUP_DIR
 
-			# Create backup directory if it doesn't exist
-			mkdir -p $BACKUP_DIR
+      # Backup etcd using kubectl exec (since etcd runs as a pod)
+      echo "Creating etcd snapshot: $BACKUP_FILE"
+      sudo ETCDCTL_API=3 kubectl -n kube-system exec -it etcd-$(hostname) -- etcdctl \
+        --endpoints=https://127.0.0.1:2379 \
+        --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+        --cert=/etc/kubernetes/pki/etcd/server.crt \
+        --key=/etc/kubernetes/pki/etcd/server.key \
+        snapshot save $BACKUP_FILE
 
-			# Backup etcd using kubectl exec (since etcd runs as a pod)
-			echo "Creating etcd snapshot: $BACKUP_FILE"
-			sudo ETCDCTL_API=3 kubectl -n kube-system exec -it etcd-$(hostname) -- etcdctl \
-			  --endpoints=https://127.0.0.1:2379 \
-			  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
-			  --cert=/etc/kubernetes/pki/etcd/server.crt \
-			  --key=/etc/kubernetes/pki/etcd/server.key \
-			  snapshot save $BACKUP_FILE
+      # Keep only the last 5 backups
+      echo "Cleaning up old backups..."
+      ls -t $BACKUP_DIR/etcd-snapshot-*.db | tail -n +6 | xargs -r rm
 
-			# Keep only the last 5 backups
-			echo "Cleaning up old backups..."
-			ls -t $BACKUP_DIR/etcd-snapshot-*.db | tail -n +6 | xargs -r rm
-
-			echo "Etcd backup completed successfully"	
-	`,
+      echo "Etcd backup completed successfully"  
+  `,
   },
   // Simple restore script for etcd (to be used during initialization)
   {
@@ -56,53 +53,47 @@ export const writeFiles = [
     owner: "root:root",
     permissions: "0755",
     content: sh`
-			#!/bin/bash
-			set -e
+      # Check if backup file is provided
+      if [ -z "$1" ]; then
+        echo "Usage: $0 <backup-file>"
+        exit 1
+      fi
 
-			# Check if backup file is provided
-			if [ -z "$1" ]; then
-			  echo "Usage: $0 <backup-file>"
-			  exit 1
-			fi
+      BACKUP_FILE="$1"
 
-			BACKUP_FILE="$1"
+      # Check if backup file exists
+      if [ ! -f "$BACKUP_FILE" ]; then
+        echo "ERROR: Backup file $BACKUP_FILE does not exist"
+        exit 1
+      fi
 
-			# Check if backup file exists
-			if [ ! -f "$BACKUP_FILE" ]; then
-			  echo "ERROR: Backup file $BACKUP_FILE does not exist"
-			  exit 1
-			fi
+      echo "Restoring etcd from backup: $BACKUP_FILE"
 
-			echo "Restoring etcd from backup: $BACKUP_FILE"
+      # Stop kubelet to prevent it from restarting etcd
+      sudo systemctl stop kubelet
 
-			# Stop kubelet to prevent it from restarting etcd
-			sudo systemctl stop kubelet
+      # Remove existing etcd data directory
+      sudo rm -rf /var/lib/etcd
 
-			# Remove existing etcd data directory
-			sudo rm -rf /var/lib/etcd
+      # Restore from snapshot
+      sudo ETCDCTL_API=3 etcdctl snapshot restore "$BACKUP_FILE" \
+        --data-dir=/var/lib/etcd \
+        --name=$(hostname) \
+        --initial-cluster=$(hostname)=https://localhost:2380 \
+        --initial-advertise-peer-urls=https://localhost:2380
 
-			# Restore from snapshot
-			sudo ETCDCTL_API=3 etcdctl snapshot restore "$BACKUP_FILE" \
-			  --data-dir=/var/lib/etcd \
-			  --name=$(hostname) \
-			  --initial-cluster=$(hostname)=https://localhost:2380 \
-			  --initial-advertise-peer-urls=https://localhost:2380
-
-			echo "Etcd restore completed successfully"
-		`,
+      echo "Etcd restore completed successfully"
+    `,
   },
 ];
 
 export const runcmd: RunCmd = [
   sh`
-		#!/bin/bash
-		set -euo pipefail
+    echo "Check syntax of backup and restore scripts"
 
-		echo "Check syntax of backup and restore scripts"
+    bash -n /usr/local/bin/etcd-backup.sh
+    bash -n /usr/local/bin/etcd-restore.sh
 
-		bash -n /usr/local/bin/etcd-backup.sh
-		bash -n /usr/local/bin/etcd-restore.sh
-
-		echo "Etcd backup system has been configured successfully"
-	`,
+    echo "Etcd backup system has been configured successfully"
+  `,
 ];

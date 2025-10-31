@@ -6,7 +6,6 @@ import * as containerd from "./cloud-config/containerd.ts";
 import * as gvisor from "./cloud-config/gvisor.ts";
 import * as kubelet from "./cloud-config/kubelet.ts";
 import * as kubeadm from "./cloud-config/kubeadm.ts";
-import * as externalIp from "./cloud-config/external-ip.ts";
 
 import { Packages, RunCmd } from "./cloud-config/types.ts";
 
@@ -16,7 +15,6 @@ export const packageUpdate: boolean = [
   gvisor.packageUpdate,
   kubeadm.packageUpdate,
   kubelet.packageUpdate,
-  externalIp.packageUpdate,
 ]
   .some((
     x,
@@ -29,7 +27,6 @@ export const packages: Packages = [
     gvisor.packages,
     kubeadm.packages,
     kubelet.packages,
-    externalIp.packages,
   ].flat()),
 ];
 
@@ -39,7 +36,6 @@ export const writeFiles = [
   ...gvisor.writeFiles,
   ...kubeadm.writeFiles,
   ...kubelet.writeFiles,
-  ...externalIp.writeFiles,
 ].map((item) => ({ ...item, content: item.content.noindent().trim() }));
 
 export const runcmd: RunCmd = [
@@ -48,7 +44,6 @@ export const runcmd: RunCmd = [
   gvisor.runcmd,
   kubeadm.runcmd,
   kubelet.runcmd,
-  externalIp.runcmd,
 ].flat();
 
 export default yaml`

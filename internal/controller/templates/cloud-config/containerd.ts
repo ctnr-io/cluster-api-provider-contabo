@@ -1,4 +1,4 @@
-import { sh, tag } from "jsr:@tmpl/core"
+import { sh, tag } from "jsr:@tmpl/core";
 import { Packages, PackageUpdate, RunCmd, WriteFiles } from "./types.ts";
 
 export const packageUpdate: PackageUpdate = true;
@@ -15,7 +15,7 @@ export const writeFiles: WriteFiles = [
     path: "/etc/modules-load.d/k8s.conf",
     owner: "root:root",
     permissions: "0644",
-    content: tag('conf')`
+    content: tag("conf")`
       overlay
       br_netfilter
     `,
@@ -24,14 +24,14 @@ export const writeFiles: WriteFiles = [
     path: "/etc/sysctl.d/k8s.conf",
     owner: "root:root",
     permissions: "0644",
-    content: tag('conf')`
+    content: tag("conf")`
       net.bridge.bridge-nf-call-iptables  = 1
       net.bridge.bridge-nf-call-ip6tables = 1
       net.ipv4.ip_forward                 = 1
       net.ipv6.conf.all.forwarding = 1
     `,
   },
-]
+];
 
 export const runcmd: RunCmd = [
   sh`
