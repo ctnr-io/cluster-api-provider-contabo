@@ -41,6 +41,24 @@ write_files:
     net.bridge.bridge-nf-call-ip6tables = 1
     net.ipv4.ip_forward                 = 1
     net.ipv6.conf.all.forwarding = 1
+- path: /usr/local/bin/external-ip-setup.sh
+  owner: 'root:root'
+  permissions: '0755'
+  content: "#!/bin/bash\nset -e\nset -x\n\t\nNODE_NAME=$(hostname)\nKUBECONFIG=\"/etc/kubernetes/kubelet.conf\"\nEXTERNAL_IPV4=$(hostname -I | tr ' ' '\\n' | grep -v ':' | head -1)\nEXTERNAL_IPV6=$(hostname -I | tr ' ' '\\n' | grep ':' | head -1)\n\t\necho \"Node name: $NODE_NAME\"\necho \"External IP V4: $EXTERNAL_IPV4\"\necho \"External IP V6: $EXTERNAL_IPV6\"\n\t\n# Wait for the node to be Ready\nwhile ! kubectl --kubeconfig \"$KUBECONFIG\" get nodes \"$NODE_NAME\" -o jsonpath='{.status.conditions[?(@.type==\"Ready\")].status}' | grep -q \"True\"; do\n\techo \"Waiting for node to be ready...\"\n\tsleep 5\ndone\n\t\n# Patch node status with external IPs if present\nif [ -n \"$EXTERNAL_IPV6\" ]; then\n\tkubectl --kubeconfig \"$KUBECONFIG\" patch node \"$NODE_NAME\" \\\n\t\t--subresource=status \\\n\t\t--type=json \\\n\t\t-p=\"[{'op':'add','path':'/status/addresses/-','value':{'type':'ExternalIP','address':'$EXTERNAL_IPV6'}}]\"\nfi\n\t\nif [ -n \"$EXTERNAL_IPV4\" ]; then\n\tkubectl --kubeconfig \"$KUBECONFIG\" patch node \"$NODE_NAME\" \\\n\t\t--subresource=status \\\n\t\t--type=json \\\n\t\t-p=\"[{'op':'add','path':'/status/addresses/-','value':{'type':'ExternalIP','address':'$EXTERNAL_IPV4'}}]\"\nfi\n\t\n# Remove cloud provider taint if present\nkubectl --kubeconfig \"$KUBECONFIG\" taint node \"$NODE_NAME\" node.cloudprovider.kubernetes.io/uninitialized- || true"
+- path: /etc/systemd/system/external-ip-setup.service
+  owner: 'root:root'
+  permissions: '0644'
+  content: |-
+    [Unit]
+    Description=Add external IPs to Kubernetes node status
+    After=network.target
+
+    [Service]
+    Type=oneshot
+    ExecStart=/usr/local/bin/external-ip-setup.sh
+
+    [Install]
+    WantedBy=multi-user.target
 
 packages:
   - sudo
@@ -157,7 +175,15 @@ runcmd:
     set -e
     set -x
     ipv4=$(hostname -I | tr ' ' '\n' | grepcidr '${INTERNAL_IPV4_CIDR}' | head -1)
-    echo "KUBELET_EXTRA_ARGS=--node-ip=$ipv4 --provider-id=${PROVIDER_ID}" | sudo tee /etc/default/kubelet
+    ipv6=$(hostname -I | tr ' ' '\n' | grep ':' | head -1)
+    echo "KUBELET_EXTRA_ARGS=--node-ip=$ipv4,$ipv6 --provider-id=${PROVIDER_ID}" | sudo tee /etc/default/kubelet
 
     sudo systemctl daemon-reload
     sudo systemctl restart kubelet
+  
+  - |
+    #!/bin/sh
+    sudo mkdir -p /usr/local/bin
+    sudo systemctl daemon-reload
+    sudo systemctl enable external-ip-setup.service
+    sudo systemctl start external-ip-setup.service
