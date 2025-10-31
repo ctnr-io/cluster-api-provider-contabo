@@ -14,7 +14,8 @@ export const runcmd = [
     set -e
     set -x
     ipv4=$(hostname -I | tr ' ' '\n' | grepcidr '${internalIpv4Cidr}' | head -1)
-    echo "KUBELET_EXTRA_ARGS=--node-ip=$ipv4 --provider-id=${providerId}" | sudo tee /etc/default/kubelet
+    ipv6=$(hostname -I | tr ' ' '\n' | grep ':' | head -1)
+    echo "KUBELET_EXTRA_ARGS=--node-ip=$ipv4,$ipv6 --provider-id=${providerId}" | sudo tee /etc/default/kubelet
 
     sudo systemctl daemon-reload
     sudo systemctl restart kubelet
