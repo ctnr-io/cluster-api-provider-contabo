@@ -14,6 +14,7 @@ export const writeFiles: WriteFiles = [
     content: sh`
       #!/bin/sh
       ip route \
+        | grep 'eth' \
         | grep -v default \
         | grep -v '${privateNetworkCidr}' \
         | cut -d' ' -f1 \

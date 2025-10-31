@@ -8,6 +8,7 @@ write_files:
   content: |-
     #!/bin/sh
     ip route \
+      | grep 'eth' \
       | grep -v default \
       | grep -v '${PRIVATE_NETWORK_CIDR}' \
       | cut -d' ' -f1 \
