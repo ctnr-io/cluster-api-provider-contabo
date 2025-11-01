@@ -542,6 +542,14 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpointSlices(ctx conte
 				},
 			})
 		}
+		if machine.Status.Instance != nil && machine.Status.Instance.IpConfig.V6.Ip != "" {
+			endpoints = append(endpoints, discoveryv1.Endpoint{
+				Addresses: []string{machine.Status.Instance.IpConfig.V6.Ip},
+				Conditions: discoveryv1.EndpointConditions{
+					Ready: ptr.To(true),
+				},
+			})
+		}
 	}
 
 	endpointPort := contaboCluster.Spec.ControlPlaneEndpoint.Port

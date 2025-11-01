@@ -4,6 +4,10 @@ on:
   push:
     branches: [ main ]
 
+concurrency:
+  group: e2e_test
+  cancel-in-progress: false
+
 jobs:
   test-e2e:
     name: Run on Ubuntu

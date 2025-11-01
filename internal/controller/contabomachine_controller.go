@@ -726,15 +726,15 @@ func (r *ContaboMachineReconciler) updateContaboMachineAddresses(ctx context.Con
 			break
 		}
 	}
-	// Look for external ip v4 in instance
-	addresses = append(addresses, clusterv1.MachineAddress{
-		Type:    clusterv1.MachineExternalIP,
-		Address: contaboMachine.Status.Instance.IpConfig.V4.Ip,
-	})
 	// Look for external ip v6 in instance
 	addresses = append(addresses, clusterv1.MachineAddress{
 		Type:    clusterv1.MachineExternalIP,
 		Address: contaboMachine.Status.Instance.IpConfig.V6.Ip,
+	})
+	// Look for external ip v4 in instance
+	addresses = append(addresses, clusterv1.MachineAddress{
+		Type:    clusterv1.MachineExternalIP,
+		Address: contaboMachine.Status.Instance.IpConfig.V4.Ip,
 	})
 
 	// Add hostname entry
@@ -955,16 +955,17 @@ func (r *ContaboMachineReconciler) initializeNode(ctx context.Context, machine *
 			"nodeName", nodeName,
 			"instanceID", contaboMachine.Status.Instance.InstanceId)
 
-		// Prepare complete address list including any missing external IPs
+		// Build a map to deduplicate addresses by (Type, Address)
+		// Collect all addresses
 		addresses := []corev1.NodeAddress{}
-		for _, ip := range contaboMachine.Status.Addresses {
+		for _, addr := range contaboMachine.Status.Addresses {
 			addresses = append(addresses, corev1.NodeAddress{
-				Type:    corev1.NodeAddressType(ip.Type),
-				Address: ip.Address,
+				Type:    corev1.NodeAddressType(addr.Type),
+				Address: addr.Address,
 			})
 		}
 
-		// Create patch with complete address list
+		// Patch node with merged addresses
 		patchNode := &corev1.Node{
 			Status: corev1.NodeStatus{
 				Addresses: addresses,
@@ -981,7 +982,7 @@ func (r *ContaboMachineReconciler) initializeNode(ctx context.Context, machine *
 			"nodeName", nodeName,
 			"ips", addresses)
 
-		_, err = k8sClient.CoreV1().Nodes().Patch(ctx, nodeName, types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{}, "status")
+		_, err = k8sClient.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status")
 		if err != nil {
 			log.Error(err, "Failed to patch node with external IPs", "nodeName", nodeName)
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
@@ -989,7 +990,7 @@ func (r *ContaboMachineReconciler) initializeNode(ctx context.Context, machine *
 
 		log.Info("Successfully patched node with IPs", "nodeName", nodeName, "ips", addresses)
 
-		// Remove unitialized taint if present
+		// Set node providerId and Remove unitialized taint if present
 		node, err = k8sClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
@@ -999,6 +1000,8 @@ func (r *ContaboMachineReconciler) initializeNode(ctx context.Context, machine *
 			log.Info("Node not found in cluster, kubelet seems not ready, will retry", "nodeName", nodeName)
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
+
+		node.Spec.ProviderID = BuildProviderID(contaboMachine.Status.Instance.Name)
 
 		taintRemoved := false
 		for i, taint := range node.Spec.Taints {

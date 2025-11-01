@@ -496,7 +496,6 @@ var _ = Describe("Manager", Ordered, func() {
 				return err
 			}, 2*time.Minute, 5*time.Second).Should(Succeed())
 
-
 			By("verifying EndpointSlice has correct labels")
 			Eventually(func() string {
 				output, _ := kubectl("get", "endpointslice", endpointSliceName, "-n", testNamespace, "-o", "jsonpath={.metadata.labels.kubernetes\\.io/service-name}")

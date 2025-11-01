@@ -157,8 +157,7 @@ runcmd:
     set -e
     set -x
     ipv4=$(hostname -I | tr ' ' '\n' | grepcidr '${INTERNAL_IPV4_CIDR}' | head -1)
-    ipv6=$(hostname -I | tr ' ' '\n' | grep ':' | head -1)
-    echo "KUBELET_EXTRA_ARGS=--node-ip=$ipv4,$ipv6 --cloud-provider=external" | sudo tee /etc/default/kubelet
+    echo "KUBELET_EXTRA_ARGS=--node-ip=$ipv4 --cloud-provider=external" | sudo tee /etc/default/kubelet
 
     sudo systemctl daemon-reload
     sudo systemctl restart kubelet
