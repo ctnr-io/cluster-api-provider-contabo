@@ -529,13 +529,15 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpointSlices(ctx conte
 
 	// Service name must match the control plane endpoint host for DNS resolution
 	serviceName := fmt.Sprintf("%s-apiserver", contaboCluster.Name)
-	endpointSliceName := fmt.Sprintf("%s-apiserver", contaboCluster.Name)
+	endpointSliceV4Name := fmt.Sprintf("%s-ipv4-apiserver", contaboCluster.Name)
+	endpointSliceV6Name := fmt.Sprintf("%s-ipv6-apiserver", contaboCluster.Name)
 
 	// Collect all control plane instance IPs
-	var endpoints []discoveryv1.Endpoint
+	var endpointsV4 []discoveryv1.Endpoint
+	var endpointsV6 []discoveryv1.Endpoint
 	for _, machine := range controlPlaneContaboMachineList.Items {
 		if machine.Status.Instance != nil && machine.Status.Instance.IpConfig.V4.Ip != "" {
-			endpoints = append(endpoints, discoveryv1.Endpoint{
+			endpointsV4 = append(endpointsV4, discoveryv1.Endpoint{
 				Addresses: []string{machine.Status.Instance.IpConfig.V4.Ip},
 				Conditions: discoveryv1.EndpointConditions{
 					Ready: ptr.To(true),
@@ -543,7 +545,7 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpointSlices(ctx conte
 			})
 		}
 		if machine.Status.Instance != nil && machine.Status.Instance.IpConfig.V6.Ip != "" {
-			endpoints = append(endpoints, discoveryv1.Endpoint{
+			endpointsV6 = append(endpointsV6, discoveryv1.Endpoint{
 				Addresses: []string{machine.Status.Instance.IpConfig.V6.Ip},
 				Conditions: discoveryv1.EndpointConditions{
 					Ready: ptr.To(true),
@@ -554,9 +556,9 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpointSlices(ctx conte
 
 	endpointPort := contaboCluster.Spec.ControlPlaneEndpoint.Port
 
-	endpointSlice := &discoveryv1.EndpointSlice{
+	endpointSliceV4 := &discoveryv1.EndpointSlice{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      endpointSliceName,
+			Name:      endpointSliceV4Name,
 			Namespace: contaboCluster.Namespace,
 			Labels: map[string]string{
 				clusterv1.ClusterNameLabel:   contaboCluster.Name,
@@ -575,7 +577,7 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpointSlices(ctx conte
 			},
 		},
 		AddressType: discoveryv1.AddressTypeIPv4,
-		Endpoints:   endpoints,
+		Endpoints:   endpointsV4,
 		Ports: []discoveryv1.EndpointPort{
 			{
 				Name:     ptr.To("https"),
@@ -585,30 +587,89 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpointSlices(ctx conte
 		},
 	}
 
-	// Try to get existing endpoint slice
-	existingEndpointSlice := &discoveryv1.EndpointSlice{}
+	endpointSliceV6 := &discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      endpointSliceV6Name,
+			Namespace: contaboCluster.Namespace,
+			Labels: map[string]string{
+				clusterv1.ClusterNameLabel:   contaboCluster.Name,
+				"component":                  "apiserver",
+				discoveryv1.LabelServiceName: serviceName,
+				discoveryv1.LabelManagedBy:   "cluster-api-provider-contabo",
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: contaboCluster.APIVersion,
+					Kind:       contaboCluster.Kind,
+					Name:       contaboCluster.Name,
+					UID:        contaboCluster.UID,
+					Controller: ptr.To(true),
+				},
+			},
+		},
+		AddressType: discoveryv1.AddressTypeIPv6,
+		Endpoints:   endpointsV6,
+		Ports: []discoveryv1.EndpointPort{
+			{
+				Name:     ptr.To("https"),
+				Port:     ptr.To(endpointPort),
+				Protocol: ptr.To(corev1.ProtocolTCP),
+			},
+		},
+	}
+
+	// Try to get existing endpoint slice v4
+	existingEndpointSliceV4 := &discoveryv1.EndpointSlice{}
 	err := r.Get(ctx, client.ObjectKey{
-		Name:      endpointSliceName,
+		Name:      endpointSliceV4Name,
 		Namespace: contaboCluster.Namespace,
-	}, existingEndpointSlice)
+	}, existingEndpointSliceV4)
 
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Create the endpoint slice
-			log.Info("Creating control plane endpoint slice", "endpointSliceName", endpointSliceName, "endpointCount", len(endpoints))
-			if err := r.Create(ctx, endpointSlice); err != nil {
+			log.Info("Creating control plane endpoint slice", "endpointSliceV4Name", endpointSliceV4Name, "endpointCount", len(endpointsV4))
+			if err := r.Create(ctx, endpointSliceV4); err != nil {
 				return fmt.Errorf("failed to create control plane endpoint slice: %w", err)
 			}
-			log.Info("Created control plane endpoint slice", "endpointSliceName", endpointSliceName)
+			log.Info("Created control plane endpoint slice", "endpointSliceV4Name", endpointSliceV4Name)
 		} else {
 			return fmt.Errorf("failed to get control plane endpoint slice: %w", err)
 		}
 	} else {
 		// Update the endpoint slice if needed
-		existingEndpointSlice.Endpoints = endpointSlice.Endpoints
-		existingEndpointSlice.Ports = endpointSlice.Ports
-		log.Info("Updating control plane endpoint slice", "endpointSliceName", endpointSliceName, "endpointCount", len(endpoints))
-		if err := r.Update(ctx, existingEndpointSlice); err != nil {
+		existingEndpointSliceV4.Endpoints = endpointSliceV4.Endpoints
+		existingEndpointSliceV4.Ports = endpointSliceV4.Ports
+		log.Info("Updating control plane endpoint slice", "endpointSliceV4Name", endpointSliceV4Name, "endpointCount", len(endpointsV4))
+		if err := r.Update(ctx, existingEndpointSliceV4); err != nil {
+			return fmt.Errorf("failed to update control plane endpoint slice: %w", err)
+		}
+	}
+
+	// Try to get existing endpoint slice v6
+	existingEndpointSliceV6 := &discoveryv1.EndpointSlice{}
+	err = r.Get(ctx, client.ObjectKey{
+		Name:      endpointSliceV6Name,
+		Namespace: contaboCluster.Namespace,
+	}, existingEndpointSliceV6)
+
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// Create the endpoint slice
+			log.Info("Creating control plane endpoint slice", "endpointSliceV6Name", endpointSliceV6Name, "endpointCount", len(endpointsV6))
+			if err := r.Create(ctx, endpointSliceV6); err != nil {
+				return fmt.Errorf("failed to create control plane endpoint slice: %w", err)
+			}
+			log.Info("Created control plane endpoint slice", "endpointSliceV6Name", endpointSliceV6Name)
+		} else {
+			return fmt.Errorf("failed to get control plane endpoint slice: %w", err)
+		}
+	} else {
+		// Update the endpoint slice if needed
+		existingEndpointSliceV6.Endpoints = endpointSliceV6.Endpoints
+		existingEndpointSliceV6.Ports = endpointSliceV6.Ports
+		log.Info("Updating control plane endpoint slice", "endpointSliceV6Name", endpointSliceV6Name, "endpointCount", len(endpointsV6))
+		if err := r.Update(ctx, existingEndpointSliceV6); err != nil {
 			return fmt.Errorf("failed to update control plane endpoint slice: %w", err)
 		}
 	}
