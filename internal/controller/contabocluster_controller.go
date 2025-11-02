@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -545,8 +546,10 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpointSlices(ctx conte
 			})
 		}
 		if machine.Status.Instance != nil && machine.Status.Instance.IpConfig.V6.Ip != "" {
+			// Convert from 2001:0db8:85a3:0000:0000:0000:0000:0001 to 2001:db8:85a3::1
+			canonicalIpV6 := net.ParseIP(machine.Status.Instance.IpConfig.V6.Ip).String()
 			endpointsV6 = append(endpointsV6, discoveryv1.Endpoint{
-				Addresses: []string{machine.Status.Instance.IpConfig.V6.Ip},
+				Addresses: []string{canonicalIpV6},
 				Conditions: discoveryv1.EndpointConditions{
 					Ready: ptr.To(true),
 				},
