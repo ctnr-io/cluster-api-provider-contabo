@@ -489,16 +489,29 @@ var _ = Describe("Manager", Ordered, func() {
 				return strings.TrimSpace(output)
 			}, 2*time.Minute, 5*time.Second).Should(Equal("6443"))
 
-			By("verifying control plane endpoint EndpointSlice is created")
-			endpointSliceName := fmt.Sprintf("%s-apiserver", "test-cluster")
+			By("verifying control plane endpoints EndpointSlice ipv4 is created")
+			endpointSliceV4Name := fmt.Sprintf("%s-ipv4-apiserver", "test-cluster")
 			Eventually(func() error {
-				_, err := kubectl("get", "endpointslice", endpointSliceName, "-n", testNamespace)
+				_, err := kubectl("get", "endpointslice", endpointSliceV4Name, "-n", testNamespace)
 				return err
 			}, 2*time.Minute, 5*time.Second).Should(Succeed())
 
 			By("verifying EndpointSlice has correct labels")
 			Eventually(func() string {
-				output, _ := kubectl("get", "endpointslice", endpointSliceName, "-n", testNamespace, "-o", "jsonpath={.metadata.labels.kubernetes\\.io/service-name}")
+				output, _ := kubectl("get", "endpointslice", endpointSliceV4Name, "-n", testNamespace, "-o", "jsonpath={.metadata.labels.kubernetes\\.io/service-name}")
+				return strings.TrimSpace(output)
+			}, 2*time.Minute, 5*time.Second).Should(Equal(serviceName))
+
+			By("verifying control plane endpoints EndpointSlice ipv6 is created")
+			endpointSliceV6Name := fmt.Sprintf("%s-ipv6-apiserver", "test-cluster")
+			Eventually(func() error {
+				_, err := kubectl("get", "endpointslice", endpointSliceV6Name, "-n", testNamespace)
+				return err
+			}, 2*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("verifying EndpointSlice ipv6 has correct labels")
+			Eventually(func() string {
+				output, _ := kubectl("get", "endpointslice", endpointSliceV6Name, "-n", testNamespace, "-o", "jsonpath={.metadata.labels.kubernetes\\.io/service-name}")
 				return strings.TrimSpace(output)
 			}, 2*time.Minute, 5*time.Second).Should(Equal(serviceName))
 
@@ -595,9 +608,15 @@ var _ = Describe("Manager", Ordered, func() {
 				return err
 			}, 2*time.Minute, 5*time.Second).ShouldNot(Succeed())
 
-			By("verifying control plane endpoint EndpointSlice is deleted")
+			By("verifying control plane endpoint EndpointSlice ipv4 is deleted")
 			Eventually(func() error {
-				_, err := kubectl("get", "endpointslice", endpointSliceName, "-n", testNamespace)
+				_, err := kubectl("get", "endpointslice", endpointSliceV4Name, "-n", testNamespace)
+				return err
+			}, 2*time.Minute, 5*time.Second).ShouldNot(Succeed())
+
+			By("verifying control plane endpoint EndpointSlice ipv6 is deleted")
+			Eventually(func() error {
+				_, err := kubectl("get", "endpointslice", endpointSliceV6Name, "-n", testNamespace)
 				return err
 			}, 2*time.Minute, 5*time.Second).ShouldNot(Succeed())
 
