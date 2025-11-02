@@ -90,7 +90,7 @@ func (r *ContaboMachineReconciler) findReusableInstance(
 					instance := convertListInstanceResponseData(&resp.JSON200.Data[i])
 
 					// Reset the instance by removing any private network assignments
-					if err := r.resetInstance(ctx, instance); err != nil {
+					if err := r.resetInstance(ctx, contaboMachine, instance, nil); err != nil {
 						log.Error(err, "Failed to reset instance",
 							"instanceID", instance.InstanceId)
 						continue

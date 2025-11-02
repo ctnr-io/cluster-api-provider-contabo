@@ -1,6 +1,6 @@
 import { sh, toml } from "jsr:@tmpl/core";
 import { Packages, PackageUpdate, WriteFiles } from "./types.ts";
-import { privateNetworkCidr } from "./variables.ts";
+import { internalIpv4, privateNetworkCidr } from "./variables.ts";
 
 export const packageUpdate: PackageUpdate = false;
 
@@ -42,11 +42,19 @@ export const writeFiles: WriteFiles = [
 
 export const runcmd = [
   sh`
-    #!/bin/sh
+    #!/bin/bash
+
     # Remove unused network subnet configuration from contabo at boot time
     sudo mkdir -p /usr/local/bin
     sudo systemctl daemon-reload
     sudo systemctl enable contabo-network-cleanup.service
     sudo systemctl start contabo-network-cleanup.service
+
+    # Check that the internal ip is consistent with real assigned ip
+    # Why? Some instance got assigned an ip that doesn't correspond to the real private network ip
+    ip route | grep 'eth' | grep '${privateNetworkCidr}' | grep '${internalIpv4}' > /dev/null || {
+      echo "Error: Internal IP does not match the assigned private network IP range"
+      exit 1
+    }
   `,
 ];

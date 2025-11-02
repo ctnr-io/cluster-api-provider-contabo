@@ -385,7 +385,9 @@ func (r *ContaboMachineReconciler) getBootstrapData(ctx context.Context, machine
 	mergedConfigStr = strings.ReplaceAll(mergedConfigStr, "${KUBEADM_VERSION}", kubadmVersion)
 	mergedConfigStr = strings.ReplaceAll(mergedConfigStr, "${PRIVATE_NETWORK_CIDR}", privateNetworkCIDR)
 	mergedConfigStr = strings.ReplaceAll(mergedConfigStr, "${INTERNAL_IPV4_CIDR}", privateNetworkCIDR)
-	mergedConfigStr = strings.ReplaceAll(mergedConfigStr, "${INTERNAL_IPV6_CIDR}", "")
+	mergedConfigStr = strings.ReplaceAll(mergedConfigStr, "${INTERNAL_IPV4}", net.ParseIP(contaboMachine.Status.Instance.IpConfig.V4.Ip).String())
+	mergedConfigStr = strings.ReplaceAll(mergedConfigStr, "${EXTERNAL_IPV4}", net.ParseIP(contaboMachine.Status.Instance.IpConfig.V4.Ip).String())
+	mergedConfigStr = strings.ReplaceAll(mergedConfigStr, "${EXTERNAL_IPV6}", net.ParseIP(contaboMachine.Status.Instance.IpConfig.V6.Ip).String())
 	mergedConfigStr = strings.ReplaceAll(mergedConfigStr, "${PROVIDER_ID}", *contaboMachine.Spec.ProviderID)
 
 	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
@@ -418,6 +420,11 @@ func (r *ContaboMachineReconciler) provisionInstance(ctx context.Context, contab
 
 	// Handle private network assignment
 	if result, err := r.reconcilePrivateNetworkAssignment(ctx, contaboMachine, contaboCluster); err != nil || result.RequeueAfter > 0 {
+		return result, err
+	}
+
+	// Validate instance status again after private network assignment
+	if result, err := r.validateInstanceStatus(ctx, contaboMachine); err != nil || result.RequeueAfter > 0 {
 		return result, err
 	}
 
@@ -501,7 +508,7 @@ func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, c
 			"errorMessage", *contaboMachine.Status.Instance.ErrorMessage)
 
 		// Reset instance
-		err := r.resetInstance(ctx, contaboMachine.Status.Instance)
+		err := r.resetInstance(ctx, contaboMachine, contaboMachine.Status.Instance, contaboMachine.Status.Instance.ErrorMessage)
 		if err != nil {
 			log.Error(err, "Failed to reset instance",
 				"instanceID", contaboMachine.Status.Instance.InstanceId)
@@ -528,7 +535,7 @@ func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, c
 	case infrastructurev1beta2.InstanceStatusOther:
 	case infrastructurev1beta2.InstanceStatusProductNotAvailable:
 	case infrastructurev1beta2.InstanceStatusVerificationRequired:
-		errorMessage := ""
+		errorMessage := "Instance in error state"
 		if contaboMachine.Status.Instance.ErrorMessage != nil {
 			errorMessage = *contaboMachine.Status.Instance.ErrorMessage
 		}
@@ -539,7 +546,7 @@ func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, c
 			"errorMessage", errorMessage)
 
 		// Reset instance
-		err := r.resetInstance(ctx, contaboMachine.Status.Instance)
+		err := r.resetInstance(ctx, contaboMachine, contaboMachine.Status.Instance, &errorMessage)
 		if err != nil {
 			log.Error(err, "Failed to reset instance",
 				"instanceID", contaboMachine.Status.Instance.InstanceId)
@@ -837,6 +844,10 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 			message := "cloud-init failed, check the /var/log/cloud-init.log and /var/log/cloud-init-output.log files on the instance for more details"
 			err := errors.New(*output)
 			log.Error(err, message)
+			if err := r.resetInstance(ctx, contaboMachine, contaboMachine.Status.Instance, &message); err != nil {
+				log.Error(err, "Failed to reset instance after cloud-init failure",
+					"instanceID", contaboMachine.Status.Instance.InstanceId)
+			}
 			return ctrl.Result{}, err
 		}
 
@@ -1055,7 +1066,7 @@ func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, contaboM
 	}
 
 	// Reset the instance by removing it from any private networks
-	if err := r.resetInstance(ctx, contaboMachine.Status.Instance); err != nil {
+	if err := r.resetInstance(ctx, contaboMachine, contaboMachine.Status.Instance, nil); err != nil {
 		log.Error(err, "Failed to reset instance during deletion",
 			"instanceID", contaboMachine.Status.Instance.InstanceId)
 	}
@@ -1366,7 +1377,7 @@ func (r *ContaboMachineReconciler) handleError(ctx context.Context, contaboMachi
 
 // getKubeconfig retrieves the kubeconfig from the owner Cluster's secret
 // resetInstance prepares an instance for reuse by removing it from any private networks
-func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, instance *infrastructurev1beta2.ContaboInstanceStatus) error {
+func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, instance *infrastructurev1beta2.ContaboInstanceStatus, errorMessage *string) error {
 	var err error
 	log := logf.FromContext(ctx)
 
@@ -1421,6 +1432,9 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, instance *
 	if instance.ErrorMessage != nil {
 		displayName = Truncate(fmt.Sprintf("[capc] %d %s", instance.InstanceId, *instance.ErrorMessage), 255) // Contabo display name max length is 255 characters
 	}
+	if errorMessage != nil {
+		displayName = Truncate(fmt.Sprintf("[capc] %d %s", instance.InstanceId, *errorMessage), 255) // Contabo display name max length is 255 characters
+	}
 	_, err = r.ContaboClient.PatchInstanceWithResponse(ctx, instance.InstanceId, nil, models.PatchInstanceRequest{
 		DisplayName: &displayName,
 	})
@@ -1443,6 +1457,9 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, instance *
 	}
 
 	time.Sleep(5 * time.Second) // Wait a bit to ensure reboot is processed
+
+	// Remove Instance from Status
+	contaboMachine.Status = infrastructurev1beta2.ContaboMachineStatus{}
 
 	return err
 }
