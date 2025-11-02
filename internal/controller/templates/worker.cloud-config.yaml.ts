@@ -3,7 +3,6 @@ import * as YAML from "jsr:@std/yaml";
 
 import * as network from "./cloud-config/network.ts";
 import * as containerd from "./cloud-config/containerd.ts";
-import * as gvisor from "./cloud-config/gvisor.ts";
 import * as kubelet from "./cloud-config/kubelet.ts";
 import * as kubeadm from "./cloud-config/kubeadm.ts";
 
@@ -12,7 +11,6 @@ import { Packages, RunCmd } from "./cloud-config/types.ts";
 export const packageUpdate: boolean = [
   network.packageUpdate,
   containerd.packageUpdate,
-  gvisor.packageUpdate,
   kubeadm.packageUpdate,
   kubelet.packageUpdate,
 ]
@@ -24,7 +22,6 @@ export const packages: Packages = [
   ...new Set([
     network.packages,
     containerd.packages,
-    gvisor.packages,
     kubeadm.packages,
     kubelet.packages,
   ].flat()),
@@ -33,7 +30,6 @@ export const packages: Packages = [
 export const writeFiles = [
   ...network.writeFiles,
   ...containerd.writeFiles,
-  ...gvisor.writeFiles,
   ...kubeadm.writeFiles,
   ...kubelet.writeFiles,
 ].map((item) => ({ ...item, content: item.content.noindent().trim() }));
@@ -41,7 +37,6 @@ export const writeFiles = [
 export const runcmd: RunCmd = [
   network.runcmd,
   containerd.runcmd,
-  gvisor.runcmd,
   kubeadm.runcmd,
   kubelet.runcmd,
 ].flat();

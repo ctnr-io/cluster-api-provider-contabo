@@ -48,19 +48,33 @@ export const runcmd: RunCmd = [
     sudo add-apt-repository "deb [arch=amd64] https://storage.googleapis.com/gvisor/releases release main"  
   `,
   sh`
+    # Add gvisor's official GPG key and runsc runtime
+    curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
+    sudo apt-get update && sudo apt-get install -y runsc
+  `,
+  sh`
     # Update apt and install containerd & runsc
     export DEBIAN_FRONTEND=noninteractive
     sudo apt-get update
-    sudo apt-get install -y containerd.io runsc
+    sudo apt-get install -y containerd.io
   `,
   sh`
-    # Configure containerd for Kubernetes
+    # Configure containerd with gvisor for Kubernetes
     sudo mkdir -p /etc/containerd
-    containerd config default | sudo tee /etc/containerd/config.toml > /dev/null
-  `,
-  sh`
-    # Set SystemdCgroup to true for containerd
-    sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
+    cat <<EOF | sudo tee /etc/containerd/config.toml
+    version = 2
+    [plugins."io.containerd.runtime.v1.linux"]
+      shim_debug = true
+    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+      runtime_type = "io.containerd.runc.v2"
+      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+        SystemdCgroup = true
+    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+      runtime_type = "io.containerd.runsc.v1"
+      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc.options]
+        SystemdCgroup = true
+    EOF
   `,
   sh`
     # Enable containerd service
