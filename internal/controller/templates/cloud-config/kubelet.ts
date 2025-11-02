@@ -1,6 +1,6 @@
 import { sh } from "jsr:@tmpl/core";
 import { PackageUpdate, WriteFiles } from "./types.ts";
-import { internalIpv4Cidr, providerId } from "./variables.ts";
+import { internalIpv4Cidr } from "./variables.ts";
 
 export const packageUpdate: PackageUpdate = false;
 

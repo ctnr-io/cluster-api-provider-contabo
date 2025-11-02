@@ -1,6 +1,6 @@
 import { sh, toml } from "jsr:@tmpl/core";
 import { Packages, PackageUpdate, WriteFiles } from "./types.ts";
-import { internalIpv4, privateNetworkCidr } from "./variables.ts";
+import { internalIpv4, internalIpv4Cidr } from "./variables.ts";
 
 export const packageUpdate: PackageUpdate = false;
 
@@ -16,7 +16,7 @@ export const writeFiles: WriteFiles = [
       ip route \
         | grep 'eth' \
         | grep -v default \
-        | grep -v '${privateNetworkCidr}' \
+        | grep -v '${internalIpv4Cidr}' \
         | cut -d' ' -f1 \
         | xargs -r -n1 sudo ip route del
     `,
@@ -52,7 +52,7 @@ export const runcmd = [
 
     # Check that the internal ip is consistent with real assigned ip
     # Why? Some instance got assigned an ip that doesn't correspond to the real private network ip
-    ip route | grep 'eth' | grep '${privateNetworkCidr}' | grep '${internalIpv4}' > /dev/null || {
+    ip route | grep 'eth' | grep '${internalIpv4Cidr}' | grep '${internalIpv4}' > /dev/null || {
       echo "Error: Internal IP does not match the assigned private network IP range"
       exit 1
     }

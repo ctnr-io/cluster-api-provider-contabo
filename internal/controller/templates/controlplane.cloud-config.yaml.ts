@@ -29,7 +29,7 @@ export const writeFiles = [
 ];
 
 export const runcmd: RunCmd = [
-	...workerCloudConfig.runcmd,
+  ...workerCloudConfig.runcmd,
   etcdBackup.runcmd,
 ].flat();
 

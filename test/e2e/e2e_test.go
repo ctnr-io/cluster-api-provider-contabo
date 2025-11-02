@@ -362,7 +362,7 @@ var _ = Describe("Manager", Ordered, func() {
 			By("getting cluster UUID from ContaboCluster")
 			var clusterUUID string
 			Eventually(func() string {
-				output, _ := kubectl("get", "contabocluster", "test-cluster", "-n", testNamespace, "-o", "jsonpath={.status.clusterUUID}")
+				output, _ := kubectl("get", "contabocluster", "test-cluster", "-n", testNamespace, "-o", "jsonpath={.spec.clusterUUID}")
 				clusterUUID = strings.TrimSpace(output)
 				return clusterUUID
 			}, 2*time.Minute, 5*time.Second).ShouldNot(BeEmpty())
@@ -582,6 +582,8 @@ var _ = Describe("Manager", Ordered, func() {
 					return strings.TrimSpace(output)
 				}, 2*time.Minute, 5*time.Second).ShouldNot(BeEmpty(), fmt.Sprintf("Node %s should have an ExternalIP set", nodeName))
 			}
+
+			// TODO: test clusterctl move
 
 			// Test deletion
 			By("deleting the test cluster and machines")

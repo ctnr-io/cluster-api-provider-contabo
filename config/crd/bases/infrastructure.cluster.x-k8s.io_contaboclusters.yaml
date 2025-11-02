@@ -59,6 +59,9 @@ spec:
           spec:
             description: spec defines the desired state of ContaboCluster
             properties:
+              clusterUUID:
+                description: ClusterUUID is the identifier of the Contabo cluster.
+                type: string
               controlPlaneEndpoint:
                 description: ControlPlaneEndpoint represents the endpoint used to
                   communicate with the control plane.
@@ -93,9 +96,6 @@ spec:
           status:
             description: status defines the observed state of ContaboCluster
             properties:
-              clusterUUID:
-                description: ClusterUUID is the identifier of the Contabo cluster.
-                type: string
               conditions:
                 description: Conditions defines current service state of the ContaboCluster.
                 items:

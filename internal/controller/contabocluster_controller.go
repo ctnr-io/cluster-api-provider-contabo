@@ -104,7 +104,7 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	if annotations.IsPaused(cluster, contaboCluster) {
 		log.Info("ContaboCluster or linked Cluster is marked as paused. Won't reconcile")
-		return ctrl.Result{RequeueAfter: 30*time.Second}, nil
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
 	// Initialize the patch helper
@@ -191,9 +191,9 @@ func (r *ContaboClusterReconciler) markClusterReadyAndProvisioned(ctx context.Co
 func (r *ContaboClusterReconciler) ensureClusterUUID(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) string {
 	log := logf.FromContext(ctx)
 
-	if contaboCluster.Status.ClusterUUID == "" {
+	if contaboCluster.Spec.ClusterUUID == "" {
 		clusterUUID := uuid.New().String()
-		contaboCluster.Status.ClusterUUID = clusterUUID
+		contaboCluster.Spec.ClusterUUID = clusterUUID
 
 		// Set initial creating state
 		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
@@ -205,7 +205,7 @@ func (r *ContaboClusterReconciler) ensureClusterUUID(ctx context.Context, contab
 		return clusterUUID
 	}
 
-	clusterUUID := contaboCluster.Status.ClusterUUID
+	clusterUUID := contaboCluster.Spec.ClusterUUID
 
 	// Set initial updating state
 	if !meta.IsStatusConditionTrue(contaboCluster.Status.Conditions, infrastructurev1beta2.ClusterReadyCondition) {
@@ -365,6 +365,7 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 					Name:      sshKeySecretName,
 					Namespace: contaboCluster.Namespace,
 				},
+				Type: clusterv1.ClusterSecretType,
 				Data: secretData,
 			}); err != nil {
 				return r.handleError(

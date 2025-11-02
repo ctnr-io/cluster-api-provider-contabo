@@ -2,6 +2,10 @@
 package_update: true
 
 write_files:
+- path: /etc/cluster-uuid
+  owner: 'root:root'
+  permissions: '0644'
+  content: '${CLUSTER_UUID}'
 - path: /usr/local/bin/contabo-network-cleanup.sh
   owner: 'root:root'
   permissions: '0755'
@@ -10,7 +14,7 @@ write_files:
     ip route \
       | grep 'eth' \
       | grep -v default \
-      | grep -v '${PRIVATE_NETWORK_CIDR}' \
+      | grep -v '${INTERNAL_IPV4_CIDR}' \
       | cut -d' ' -f1 \
       | xargs -r -n1 sudo ip route del
 - path: /etc/systemd/system/contabo-network-cleanup.service
@@ -130,12 +134,20 @@ packages:
 
 runcmd:
   - |
-    #!/bin/sh
+    #!/bin/bash
+
     # Remove unused network subnet configuration from contabo at boot time
     sudo mkdir -p /usr/local/bin
     sudo systemctl daemon-reload
     sudo systemctl enable contabo-network-cleanup.service
     sudo systemctl start contabo-network-cleanup.service
+
+    # Check that the internal ip is consistent with real assigned ip
+    # Why? Some instance got assigned an ip that doesn't correspond to the real private network ip
+    ip route | grep 'eth' | grep '${INTERNAL_IPV4_CIDR}' | grep '${INTERNAL_IPV4}' > /dev/null || {
+      echo "Error: Internal IP does not match the assigned private network IP range"
+      exit 1
+    }
   
   - |
     # Add Docker's official GPG key

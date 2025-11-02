@@ -1,6 +1,7 @@
 import { yaml } from "jsr:@tmpl/core";
 import * as YAML from "jsr:@std/yaml";
 
+import * as clusterUUID from "./cloud-config/cluster-uuid.ts";
 import * as network from "./cloud-config/network.ts";
 import * as containerd from "./cloud-config/containerd.ts";
 import * as kubelet from "./cloud-config/kubelet.ts";
@@ -9,6 +10,7 @@ import * as kubeadm from "./cloud-config/kubeadm.ts";
 import { Packages, RunCmd } from "./cloud-config/types.ts";
 
 export const packageUpdate: boolean = [
+  clusterUUID.packageUpdate,
   network.packageUpdate,
   containerd.packageUpdate,
   kubeadm.packageUpdate,
@@ -20,6 +22,7 @@ export const packageUpdate: boolean = [
 
 export const packages: Packages = [
   ...new Set([
+    clusterUUID.packages,
     network.packages,
     containerd.packages,
     kubeadm.packages,
@@ -28,6 +31,7 @@ export const packages: Packages = [
 ];
 
 export const writeFiles = [
+  ...clusterUUID.writeFiles,
   ...network.writeFiles,
   ...containerd.writeFiles,
   ...kubeadm.writeFiles,
@@ -35,6 +39,7 @@ export const writeFiles = [
 ].map((item) => ({ ...item, content: item.content.noindent().trim() }));
 
 export const runcmd: RunCmd = [
+  clusterUUID.runcmd,
   network.runcmd,
   containerd.runcmd,
   kubeadm.runcmd,

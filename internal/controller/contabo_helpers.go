@@ -223,17 +223,17 @@ func FormatDisplayName(contaboMachine *infrastructurev1beta2.ContaboMachine, con
 	// Format as hex string
 	hashSumStr := hex.EncodeToString(hashSum)[:32]
 	// Return the formatted display name
-	return Truncate(fmt.Sprintf("[capc] %s %s", contaboCluster.Status.ClusterUUID, hashSumStr), 255)
+	return Truncate(fmt.Sprintf("[capc] %s %s", contaboCluster.Spec.ClusterUUID, hashSumStr), 255)
 }
 
 func FormatSshKeyName(contaboCluster *infrastructurev1beta2.ContaboCluster) string {
-	return Truncate(fmt.Sprintf("[capc] %s", contaboCluster.Status.ClusterUUID), 255)
+	return Truncate(fmt.Sprintf("[capc] %s", contaboCluster.Spec.ClusterUUID), 255)
 }
 
 func FormatSshKeySecretName(contaboCluster *infrastructurev1beta2.ContaboCluster) string {
-	return Truncate(fmt.Sprintf("capc-sshkey-%s", contaboCluster.Status.ClusterUUID), 253)
+	return Truncate(fmt.Sprintf("%s-cntb-sshkey", contaboCluster.Name), 253)
 }
 
 func FormatPrivateNetworkName(contaboCluster *infrastructurev1beta2.ContaboCluster) string {
-	return Truncate(fmt.Sprintf("[capc] %s", contaboCluster.Status.ClusterUUID), 255)
+	return Truncate(fmt.Sprintf("[capc] %s", contaboCluster.Spec.ClusterUUID), 255)
 }

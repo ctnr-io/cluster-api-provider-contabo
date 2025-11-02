@@ -32,6 +32,10 @@ type ContaboClusterSpec struct {
 
 	// PrivateNetwork specifies the private network configuration for the cluster.
 	PrivateNetwork ContaboPrivateNetworkSpec `json:"privateNetwork"`
+
+	// ClusterUUID is the identifier of the Contabo cluster.
+	// +optional
+	ClusterUUID string `json:"clusterUUID,omitempty"`
 }
 
 // ContaboClusterStatus defines the observed state of ContaboCluster.
@@ -39,10 +43,6 @@ type ContaboClusterStatus struct {
 	// Ready denotes that the cluster (infrastructure) is ready.
 	// +optional
 	Ready bool `json:"ready"`
-
-	// ClusterUUID is the identifier of the Contabo cluster.
-	// +optional
-	ClusterUUID string `json:"clusterUUID,omitempty"`
 
 	// PrivateNetwork contains the discovered information about private networks
 	// +optional
