@@ -132,7 +132,7 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	if annotations.IsPaused(cluster, contaboMachine) {
 		log.Info("ContaboMachine or linked Cluster is marked as paused. Won't reconcile")
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: 30*time.Second}, nil
 	}
 
 	log = log.WithValues("cluster", cluster.Name)

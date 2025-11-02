@@ -104,7 +104,7 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	if annotations.IsPaused(cluster, contaboCluster) {
 		log.Info("ContaboCluster or linked Cluster is marked as paused. Won't reconcile")
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: 30*time.Second}, nil
 	}
 
 	// Initialize the patch helper
