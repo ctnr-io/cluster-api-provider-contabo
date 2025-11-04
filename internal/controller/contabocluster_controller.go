@@ -364,6 +364,22 @@ func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboC
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      sshKeySecretName,
 					Namespace: contaboCluster.Namespace,
+					Annotations: map[string]string{
+						clusterv1.ClusterNameAnnotation: contaboCluster.Name,
+					},
+					Labels: map[string]string{
+						clusterv1.ClusterNameLabel: contaboCluster.Name,
+						"component":                "ssh-key",
+					},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: contaboCluster.APIVersion,
+							Kind:       contaboCluster.Kind,
+							Name:       contaboCluster.Name,
+							UID:        contaboCluster.UID,
+							Controller: ptr.To(true),
+						},
+					},
 				},
 				Type: clusterv1.ClusterSecretType,
 				Data: secretData,
@@ -469,6 +485,9 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneService(ctx context.Cont
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      serviceName,
 			Namespace: contaboCluster.Namespace,
+			Annotations: map[string]string{
+				clusterv1.ClusterNameAnnotation: contaboCluster.Name,
+			},
 			Labels: map[string]string{
 				clusterv1.ClusterNameLabel: contaboCluster.Name,
 				"component":                "apiserver",
@@ -564,6 +583,9 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpointSlices(ctx conte
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      endpointSliceV4Name,
 			Namespace: contaboCluster.Namespace,
+			Annotations: map[string]string{
+				clusterv1.ClusterNameAnnotation: contaboCluster.Name,
+			},
 			Labels: map[string]string{
 				clusterv1.ClusterNameLabel:   contaboCluster.Name,
 				"component":                  "apiserver",
@@ -595,6 +617,9 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpointSlices(ctx conte
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      endpointSliceV6Name,
 			Namespace: contaboCluster.Namespace,
+			Annotations: map[string]string{
+				clusterv1.ClusterNameAnnotation: contaboCluster.Name,
+			},
 			Labels: map[string]string{
 				clusterv1.ClusterNameLabel:   contaboCluster.Name,
 				"component":                  "apiserver",

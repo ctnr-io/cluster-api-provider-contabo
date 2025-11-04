@@ -43,6 +43,7 @@ kind: ContaboCluster
 metadata:
   name: ${CLUSTER_NAME}
 spec:
+  clusterUUID: ${CLUSTER_UUID:=}
   controlPlaneEndpoint:
     host: "${CONTROL_PLANE_ENDPOINT_HOST}"
     port: ${CONTROL_PLANE_ENDPOINT_PORT:=6443}

@@ -1,4 +1,4 @@
-import { sh, tag,  } from "jsr:@tmpl/core";
+import { tag } from "jsr:@tmpl/core";
 import { Packages, PackageUpdate, RunCmd, WriteFiles } from "./types.ts";
 import { clusterUUID } from "./variables.ts";
 

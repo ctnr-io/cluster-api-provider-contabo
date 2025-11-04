@@ -507,152 +507,6 @@ func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, con
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
-// validateInstanceStatus validates the instance status and handles error conditions
-func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
-
-	// If error message is set, instance is not usable, update display name to "capc <Region> error <ClusterUUID>" to avoid reuse and alert user
-	if contaboMachine.Status.Instance.ErrorMessage != nil && *contaboMachine.Status.Instance.ErrorMessage != "" {
-		log.Info("Instance has error message, marking as failed",
-			"instanceID", contaboMachine.Status.Instance.InstanceId,
-			"errorMessage", *contaboMachine.Status.Instance.ErrorMessage)
-
-		// Reset instance
-		err := r.resetInstance(ctx, contaboMachine, contaboMachine.Status.Instance, contaboMachine.Status.Instance.ErrorMessage)
-		if err != nil {
-			log.Error(err, "Failed to reset instance",
-				"instanceID", contaboMachine.Status.Instance.InstanceId)
-		}
-
-		// Remove instance form the ContaboMachine status to avoid further processing
-		instance := contaboMachine.Status.Instance
-		contaboMachine.Status.Instance = nil
-
-		return ctrl.Result{}, r.handleError(
-			ctx,
-			contaboMachine,
-			errors.New(*instance.ErrorMessage),
-			infrastructurev1beta2.InstanceFailedReason,
-			fmt.Sprintf("Instance %d has error message: %s, retrying...", instance.InstanceId, *instance.ErrorMessage),
-		)
-	}
-
-	// Check status of the instance, should not be error if this is the case, we update the resource status and requeue
-	switch contaboMachine.Status.Instance.Status {
-	case infrastructurev1beta2.InstanceStatusError:
-	case infrastructurev1beta2.InstanceStatusUnknown:
-	case infrastructurev1beta2.InstanceStatusManualProvisioning:
-	case infrastructurev1beta2.InstanceStatusOther:
-	case infrastructurev1beta2.InstanceStatusProductNotAvailable:
-	case infrastructurev1beta2.InstanceStatusVerificationRequired:
-		errorMessage := "Instance in error state"
-		if contaboMachine.Status.Instance.ErrorMessage != nil {
-			errorMessage = *contaboMachine.Status.Instance.ErrorMessage
-		}
-		// Update display name to avoid reuse
-		log.Info("Instance is in error state, marking as failed",
-			"instanceID", contaboMachine.Status.Instance.InstanceId,
-			"status", contaboMachine.Status.Instance.Status,
-			"errorMessage", errorMessage)
-
-		// Reset instance
-		err := r.resetInstance(ctx, contaboMachine, contaboMachine.Status.Instance, &errorMessage)
-		if err != nil {
-			log.Error(err, "Failed to reset instance",
-				"instanceID", contaboMachine.Status.Instance.InstanceId)
-		}
-
-		// Remove instance form the ContaboMachine status to avoid further processing
-		instance := contaboMachine.Status.Instance
-		contaboMachine.Status.Instance = nil
-
-		return ctrl.Result{}, r.handleError(
-			ctx,
-			contaboMachine,
-			errors.New(errorMessage),
-			infrastructurev1beta2.InstanceFailedReason,
-			fmt.Sprintf("Instance %d is in %s states", instance.InstanceId, instance.Status),
-		)
-	case infrastructurev1beta2.InstanceStatusPendingPayment:
-	case infrastructurev1beta2.InstanceStatusProvisioning:
-	case infrastructurev1beta2.InstanceStatusRescue:
-	case infrastructurev1beta2.InstanceStatusResetPassword:
-	case infrastructurev1beta2.InstanceStatusUninstalled:
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, r.handleError(
-			ctx,
-			contaboMachine,
-			errors.New("instance is not ready"),
-			infrastructurev1beta2.InstanceCreatingReason,
-			fmt.Sprintf("Instance %d is in %s state", contaboMachine.Status.Instance.InstanceId, contaboMachine.Status.Instance.Status),
-		)
-	case infrastructurev1beta2.InstanceStatusInstalling:
-		message := fmt.Sprintf("Instance %d is installing, waiting for it to be running...", contaboMachine.Status.Instance.InstanceId)
-		log.Info(message)
-		meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
-			Type:    infrastructurev1beta2.InstanceReadyCondition,
-			Status:  metav1.ConditionFalse,
-			Reason:  infrastructurev1beta2.InstanceCreatingReason,
-			Message: message,
-		})
-		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
-	case infrastructurev1beta2.InstanceStatusStopped:
-		message := fmt.Sprintf("Instance %d is stopped, starting it...", contaboMachine.Status.Instance.InstanceId)
-		log.Info(message)
-		meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
-			Type:    infrastructurev1beta2.InstanceReadyCondition,
-			Status:  metav1.ConditionFalse,
-			Reason:  infrastructurev1beta2.InstanceReadyReason,
-			Message: message,
-		})
-		// Start the instance if it is stopped
-		_, err := r.ContaboClient.Start(ctx, contaboMachine.Status.Instance.InstanceId, nil)
-		if err != nil {
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, r.handleError(
-				ctx,
-				contaboMachine,
-				err,
-				infrastructurev1beta2.InstanceFailedReason,
-				fmt.Sprintf("Failed to start instance %d", contaboMachine.Status.Instance.InstanceId),
-			)
-		}
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-	case infrastructurev1beta2.InstanceStatusRunning:
-		message := fmt.Sprintf("Instance %d is running", contaboMachine.Status.Instance.InstanceId)
-		log.Info(message)
-		meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
-			Type:    infrastructurev1beta2.InstanceReadyCondition,
-			Status:  metav1.ConditionTrue,
-			Reason:  infrastructurev1beta2.InstanceReadyReason,
-			Message: message,
-		})
-	}
-
-	// If there is no instance there, should fail the reconciliation
-	if contaboMachine.Status.Instance == nil {
-		return ctrl.Result{}, r.handleError(
-			ctx,
-			contaboMachine,
-			errors.New("instance is nil"),
-			infrastructurev1beta2.InstanceFailedReason,
-			"Instance should not be nil at this point",
-		)
-	}
-
-	// Instance is valid and running
-	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
-		Type:   infrastructurev1beta2.InstanceReadyCondition,
-		Status: metav1.ConditionTrue,
-		Reason: infrastructurev1beta2.InstanceReadyReason,
-	})
-	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
-		Type:   clusterv1.ReadyCondition,
-		Status: metav1.ConditionFalse,
-		Reason: infrastructurev1beta2.InstanceReadyReason,
-	})
-
-	return ctrl.Result{}, nil
-}
-
 // reconcilePrivateNetworkAssignment handles private network assignment for the instance
 func (r *ContaboMachineReconciler) reconcilePrivateNetworkAssignment(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -1409,16 +1263,35 @@ func (r *ContaboMachineReconciler) handleError(ctx context.Context, contaboMachi
 // getKubeconfig retrieves the kubeconfig from the owner Cluster's secret
 // resetInstance prepares an instance for reuse by removing it from any private networks
 func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, instance *infrastructurev1beta2.ContaboInstanceStatus, errorMessage *string) error {
-	var err error
 	log := logf.FromContext(ctx)
+
+	hasErrorMessage := errorMessage != nil || (instance != nil && instance.ErrorMessage != nil)
+
+	// Set error on contabo machine status
+	if hasErrorMessage {
+		log.Info("Instance marked with error message, updating ContaboMachine status")
+		if errorMessage != nil {
+			contaboMachine.Status.FailureMessage = errorMessage
+			contaboMachine.Status.FailureReason = ptr.To("ControllerError")
+		} else {
+			contaboMachine.Status.FailureMessage = instance.ErrorMessage
+			contaboMachine.Status.FailureReason = ptr.To("InstanceErrorMessage")
+		}
+	}
+
+	if instance == nil {
+		log.Info("Instance is nil, nothing to reset")
+		return nil
+	}
+
+	// Set error on contabo instance displayName
 	displayName := ""
 	if errorMessage != nil {
 		displayName = Truncate(fmt.Sprintf("[capc] %d %s", instance.InstanceId, *errorMessage), 255) // Contabo display name max length is 255 characters
 	} else if instance.ErrorMessage != nil {
 		displayName = Truncate(fmt.Sprintf("[capc] %d %s", instance.InstanceId, *instance.ErrorMessage), 255) // Contabo display name max length is 255 characters
 	}
-
-	_, err = r.ContaboClient.PatchInstanceWithResponse(ctx, instance.InstanceId, nil, models.PatchInstanceRequest{
+	_, err := r.ContaboClient.PatchInstanceWithResponse(ctx, instance.InstanceId, nil, models.PatchInstanceRequest{
 		DisplayName: &displayName,
 	})
 	if err != nil {
@@ -1427,18 +1300,10 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMac
 			"newDisplayName", displayName)
 	}
 
-	if errorMessage != nil || instance.ErrorMessage != nil {
-		log.Info("Instance marked with error message, skipping private network unassignment",
-			"instanceID", instance.InstanceId,
-			"displayName", displayName)
-		if errorMessage != nil {
-			contaboMachine.Status.FailureMessage = errorMessage
-			contaboMachine.Status.FailureReason = ptr.To("ControllerError")
-		} else {
-			contaboMachine.Status.FailureMessage = instance.ErrorMessage
-			contaboMachine.Status.FailureReason = ptr.To("InstanceErrorMessage")
-		}
-		return err
+	if hasErrorMessage {
+		log.Info("Instance marked with error message, skipping private network unassignment, for further investigation",
+			"instanceID", instance.InstanceId)
+		return nil
 	}
 
 	// TODO: code is ugly, needs refactoring
@@ -1451,7 +1316,7 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMac
 				for page := int64(1); ; page++ {
 					var privateNetworksResp *contaboclient.RetrievePrivateNetworkListResponse
 					// Retrieve all private networks and check if instance is part of any
-					privateNetworksResp, err = r.ContaboClient.RetrievePrivateNetworkListWithResponse(ctx, &models.RetrievePrivateNetworkListParams{
+					privateNetworksResp, err := r.ContaboClient.RetrievePrivateNetworkListWithResponse(ctx, &models.RetrievePrivateNetworkListParams{
 						Page: &page,
 						Size: ptr.To(int64(100)),
 					})

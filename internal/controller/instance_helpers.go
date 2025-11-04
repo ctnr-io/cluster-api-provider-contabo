@@ -2,13 +2,21 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
-	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
 	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/v1.0.0/models"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
+
+	_ "embed"
 )
 
 // getExistingInstance attempts to find an existing instance either from status or by display name
@@ -113,6 +121,15 @@ func (r *ContaboMachineReconciler) createNewInstance(
 ) (*infrastructurev1beta2.ContaboInstanceStatus, error) {
 	log := logf.FromContext(ctx)
 
+	if contaboMachine.Spec.Instance.Name != nil && *contaboMachine.Spec.Instance.Name != "" {
+		msg := fmt.Sprintf("instance name must not be specified to create a new instance: %s", *contaboMachine.Spec.Instance.Name)
+		if err := r.resetInstance(ctx, contaboMachine, nil, ptr.To(msg)); err != nil {
+			log.Error(err, "Failed to reset instance creation attempt with invalid name",
+				"instanceName", *contaboMachine.Spec.Instance.Name)
+		}
+		return nil, errors.New(msg)
+	}
+
 	// Check provisioning type
 	switch {
 	case contaboMachine.Spec.Instance.ProvisioningType == nil:
@@ -209,4 +226,150 @@ func (r *ContaboMachineReconciler) updateInstanceState(
 	}
 
 	return nil
+}
+
+// validateInstanceStatus validates the instance status and handles error conditions
+func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	// If error message is set, instance is not usable, update display name to "capc <Region> error <ClusterUUID>" to avoid reuse and alert user
+	if contaboMachine.Status.Instance.ErrorMessage != nil && *contaboMachine.Status.Instance.ErrorMessage != "" {
+		log.Info("Instance has error message, marking as failed",
+			"instanceID", contaboMachine.Status.Instance.InstanceId,
+			"errorMessage", *contaboMachine.Status.Instance.ErrorMessage)
+
+		// Reset instance
+		err := r.resetInstance(ctx, contaboMachine, contaboMachine.Status.Instance, contaboMachine.Status.Instance.ErrorMessage)
+		if err != nil {
+			log.Error(err, "Failed to reset instance",
+				"instanceID", contaboMachine.Status.Instance.InstanceId)
+		}
+
+		// Remove instance form the ContaboMachine status to avoid further processing
+		instance := contaboMachine.Status.Instance
+		contaboMachine.Status.Instance = nil
+
+		return ctrl.Result{}, r.handleError(
+			ctx,
+			contaboMachine,
+			errors.New(*instance.ErrorMessage),
+			infrastructurev1beta2.InstanceFailedReason,
+			fmt.Sprintf("Instance %d has error message: %s, retrying...", instance.InstanceId, *instance.ErrorMessage),
+		)
+	}
+
+	// Check status of the instance, should not be error if this is the case, we update the resource status and requeue
+	switch contaboMachine.Status.Instance.Status {
+	case infrastructurev1beta2.InstanceStatusError:
+	case infrastructurev1beta2.InstanceStatusUnknown:
+	case infrastructurev1beta2.InstanceStatusManualProvisioning:
+	case infrastructurev1beta2.InstanceStatusOther:
+	case infrastructurev1beta2.InstanceStatusProductNotAvailable:
+	case infrastructurev1beta2.InstanceStatusVerificationRequired:
+		errorMessage := "Instance in error state"
+		if contaboMachine.Status.Instance.ErrorMessage != nil {
+			errorMessage = *contaboMachine.Status.Instance.ErrorMessage
+		}
+		// Update display name to avoid reuse
+		log.Info("Instance is in error state, marking as failed",
+			"instanceID", contaboMachine.Status.Instance.InstanceId,
+			"status", contaboMachine.Status.Instance.Status,
+			"errorMessage", errorMessage)
+
+		// Reset instance
+		err := r.resetInstance(ctx, contaboMachine, contaboMachine.Status.Instance, &errorMessage)
+		if err != nil {
+			log.Error(err, "Failed to reset instance",
+				"instanceID", contaboMachine.Status.Instance.InstanceId)
+		}
+
+		// Remove instance form the ContaboMachine status to avoid further processing
+		instance := contaboMachine.Status.Instance
+		contaboMachine.Status.Instance = nil
+
+		return ctrl.Result{}, r.handleError(
+			ctx,
+			contaboMachine,
+			errors.New(errorMessage),
+			infrastructurev1beta2.InstanceFailedReason,
+			fmt.Sprintf("Instance %d is in %s states", instance.InstanceId, instance.Status),
+		)
+	case infrastructurev1beta2.InstanceStatusPendingPayment:
+	case infrastructurev1beta2.InstanceStatusProvisioning:
+	case infrastructurev1beta2.InstanceStatusRescue:
+	case infrastructurev1beta2.InstanceStatusResetPassword:
+	case infrastructurev1beta2.InstanceStatusUninstalled:
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, r.handleError(
+			ctx,
+			contaboMachine,
+			errors.New("instance is not ready"),
+			infrastructurev1beta2.InstanceCreatingReason,
+			fmt.Sprintf("Instance %d is in %s state", contaboMachine.Status.Instance.InstanceId, contaboMachine.Status.Instance.Status),
+		)
+	case infrastructurev1beta2.InstanceStatusInstalling:
+		message := fmt.Sprintf("Instance %d is installing, waiting for it to be running...", contaboMachine.Status.Instance.InstanceId)
+		log.Info(message)
+		meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+			Type:    infrastructurev1beta2.InstanceReadyCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  infrastructurev1beta2.InstanceCreatingReason,
+			Message: message,
+		})
+		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
+	case infrastructurev1beta2.InstanceStatusStopped:
+		message := fmt.Sprintf("Instance %d is stopped, starting it...", contaboMachine.Status.Instance.InstanceId)
+		log.Info(message)
+		meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+			Type:    infrastructurev1beta2.InstanceReadyCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  infrastructurev1beta2.InstanceReadyReason,
+			Message: message,
+		})
+		// Start the instance if it is stopped
+		_, err := r.ContaboClient.Start(ctx, contaboMachine.Status.Instance.InstanceId, nil)
+		if err != nil {
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, r.handleError(
+				ctx,
+				contaboMachine,
+				err,
+				infrastructurev1beta2.InstanceFailedReason,
+				fmt.Sprintf("Failed to start instance %d", contaboMachine.Status.Instance.InstanceId),
+			)
+		}
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	case infrastructurev1beta2.InstanceStatusRunning:
+		message := fmt.Sprintf("Instance %d is running", contaboMachine.Status.Instance.InstanceId)
+		log.Info(message)
+		meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+			Type:    infrastructurev1beta2.InstanceReadyCondition,
+			Status:  metav1.ConditionTrue,
+			Reason:  infrastructurev1beta2.InstanceReadyReason,
+			Message: message,
+		})
+	}
+
+	// If there is no instance there, should fail the reconciliation
+	if contaboMachine.Status.Instance == nil {
+		return ctrl.Result{}, r.handleError(
+			ctx,
+			contaboMachine,
+			errors.New("instance is nil"),
+			infrastructurev1beta2.InstanceFailedReason,
+			"Instance should not be nil at this point",
+		)
+	}
+
+	// Instance is valid and running
+	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.InstanceReadyCondition,
+		Status: metav1.ConditionTrue,
+		Reason: infrastructurev1beta2.InstanceReadyReason,
+	})
+	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+		Type:   clusterv1.ReadyCondition,
+		Status: metav1.ConditionFalse,
+		Reason: infrastructurev1beta2.InstanceReadyReason,
+	})
+
+	return ctrl.Result{}, nil
 }
