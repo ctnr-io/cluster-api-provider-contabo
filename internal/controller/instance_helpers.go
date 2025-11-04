@@ -25,17 +25,22 @@ func (r *ContaboMachineReconciler) getExistingInstance(
 	contaboMachine *infrastructurev1beta2.ContaboMachine,
 	contaboCluster *infrastructurev1beta2.ContaboCluster,
 ) (*infrastructurev1beta2.ContaboInstanceStatus, error) {
+	displayName := FormatDisplayName(contaboMachine, contaboCluster)
+
+	// Optimize by checking status first, but check display name
 	if contaboMachine.Status.Instance != nil {
 		// Get the latest status from the instance
 		instanceResp, err := r.ContaboClient.RetrieveInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, nil)
 		if err != nil || instanceResp.StatusCode() < 200 || instanceResp.StatusCode() >= 300 {
 			return nil, fmt.Errorf("failed to find instance %d from Contabo API", contaboMachine.Status.Instance.InstanceId)
 		}
-		return convertInstanceResponseData(&instanceResp.JSON200.Data[0]), nil
+		instance := convertInstanceResponseData(&instanceResp.JSON200.Data[0])
+		if instance != nil && instance.DisplayName == displayName {
+			return instance, nil
+		}
 	}
 
 	// Try to find instance by display name
-	displayName := FormatDisplayName(contaboMachine, contaboCluster)
 	instanceListResp, err := r.ContaboClient.RetrieveInstancesListWithResponse(ctx, &models.RetrieveInstancesListParams{
 		DisplayName: &displayName,
 	})
