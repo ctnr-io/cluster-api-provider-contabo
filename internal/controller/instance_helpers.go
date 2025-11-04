@@ -126,15 +126,6 @@ func (r *ContaboMachineReconciler) createNewInstance(
 ) (*infrastructurev1beta2.ContaboInstanceStatus, error) {
 	log := logf.FromContext(ctx)
 
-	if contaboMachine.Spec.Instance.Name != nil && *contaboMachine.Spec.Instance.Name != "" {
-		msg := fmt.Sprintf("instance name must not be specified to create a new instance: %s", *contaboMachine.Spec.Instance.Name)
-		if err := r.resetInstance(ctx, contaboMachine, nil, ptr.To(msg)); err != nil {
-			log.Error(err, "Failed to reset instance creation attempt with invalid name",
-				"instanceName", *contaboMachine.Spec.Instance.Name)
-		}
-		return nil, errors.New(msg)
-	}
-
 	// Check provisioning type
 	switch {
 	case contaboMachine.Spec.Instance.ProvisioningType == nil:
@@ -146,6 +137,15 @@ func (r *ContaboMachineReconciler) createNewInstance(
 		log.Info("No reusable instance found in Contabo API, will create a new one",
 			"productID", contaboMachine.Spec.Instance.ProductId,
 			"region", contaboCluster.Spec.PrivateNetwork.Region)
+
+		if contaboMachine.Spec.Instance.Name != nil && *contaboMachine.Spec.Instance.Name != "" {
+			msg := fmt.Sprintf("instance name must not be specified to create a new instance: %s", *contaboMachine.Spec.Instance.Name)
+			if err := r.resetInstance(ctx, contaboMachine, nil, ptr.To(msg)); err != nil {
+				log.Error(err, "Failed to reset instance creation attempt with invalid name",
+					"instanceName", *contaboMachine.Spec.Instance.Name)
+			}
+			return nil, errors.New(msg)
+		}
 
 		sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
 		imageId := DefaultUbuntuImageID
