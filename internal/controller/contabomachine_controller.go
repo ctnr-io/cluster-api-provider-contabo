@@ -199,6 +199,17 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 // Reconcile Normal will set required spec & status for CAPI and CABPK to work properly, the other statuses is handled by other methods
 func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	// If contabomachine have failure reason/message, do not proceed
+	if contaboMachine.Status.FailureReason != nil || contaboMachine.Status.FailureMessage != nil {
+		log.Info("ContaboMachine is in failure state, skipping reconciliation",
+			"failureReason", contaboMachine.Status.FailureReason,
+			"failureMessage", contaboMachine.Status.FailureMessage,
+		)
+		return ctrl.Result{}, nil
+	}
+
 	// Setup the resource
 	if result := r.setupContaboMachine(ctx, machine, contaboMachine, contaboCluster); result.RequeueAfter > 0 {
 		return result, nil
@@ -484,6 +495,9 @@ func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, con
 		if err != nil {
 			log.Error(err, "Failed to create new instance")
 			// Do not return error to avoid requeue storm, it would permit to create multiple instances rapidly
+			// Set Failure condition instead
+			contaboMachine.Status.FailureReason = ptr.To(string(infrastructurev1beta2.InstanceCreatingReason))
+			contaboMachine.Status.FailureMessage = ptr.To("Failed to create new instance: " + err.Error())
 			return ctrl.Result{}, nil
 		}
 		if instance != nil {
@@ -725,7 +739,7 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 				log.Error(err, "Failed to reset instance after cloud-init failure",
 					"instanceID", contaboMachine.Status.Instance.InstanceId)
 			}
-			return ctrl.Result{RequeueAfter: 5*time.Second}, err
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, err
 		}
 
 		if strings.Contains(*output, "status: running") {
