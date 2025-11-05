@@ -664,7 +664,7 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 
 			resp, err := r.ContaboClient.ReinstallInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
 				SshKeys:      &sshKeys,
-				DefaultUser:  (*models.ReinstallInstanceRequestDefaultUser)(contaboMachine.Status.Instance.DefaultUser),
+				DefaultUser:  ptr.To(models.ReinstallInstanceRequestDefaultUserAdmin),
 				ImageId:      contaboMachine.Status.Instance.ImageId,
 				RootPassword: nil,
 				UserData:     &bootstrapData,
@@ -1358,6 +1358,7 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMac
 	// Reinstall to clear any residual configuration
 	_, err = r.ContaboClient.ReinstallInstance(ctx, instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
 		ImageId: DefaultUbuntuImageID,
+		DefaultUser: ptr.To(models.ReinstallInstanceRequestDefaultUserAdmin),
 	})
 	if err != nil {
 		log.Error(err, "Failed to reinstall instance after unassigning private network",

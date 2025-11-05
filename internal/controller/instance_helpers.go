@@ -161,6 +161,7 @@ func (r *ContaboMachineReconciler) createNewInstance(
 				PrivateNetworking: ptr.To(map[string]interface{}{}),
 			},
 			DisplayName: ptr.To(FormatDisplayName(contaboMachine, contaboCluster)),
+			DefaultUser: ptr.To(models.CreateInstanceRequestDefaultUserAdmin),
 		})
 		if err != nil || instanceCreateResp.StatusCode() < 200 || instanceCreateResp.StatusCode() >= 300 {
 			log.Error(err, "Failed to create instance in Contabo API",
