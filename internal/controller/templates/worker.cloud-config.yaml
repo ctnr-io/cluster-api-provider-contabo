@@ -14,7 +14,7 @@ write_files:
     ip route \
       | grep 'eth' \
       | grep -v default \
-      | grep -v '${INTERNAL_IPV4_CIDR}' \
+      | grep -v '${INTERNAL_IPV4}' \
       | cut -d' ' -f1 \
       | xargs -r -n1 sudo ip route del
 - path: /etc/systemd/system/contabo-network-cleanup.service
@@ -68,9 +68,13 @@ runcmd:
 
     # Check that the internal ip is consistent with real assigned ip
     # Why? Some instance got assigned an ip that doesn't correspond to the real private network ip
-    ip route | grep 'eth' | grep '${INTERNAL_IPV4_CIDR}' | grep '${INTERNAL_IPV4}' > /dev/null || {
-      echo "Error: Internal IP does not match the assigned private network IP range"
-      # exit 1
+    ip route | grep 'eth' | grep '${INTERNAL_IPV4_CIDR}' > /dev/null || {
+      echo "[CAPC] Error: Internal IP Cidr is missing, Private Network CIDR: ${INTERNAL_IPV4_CIDR}"
+      exit 1
+    }
+    ip route | grep 'eth' | grep '${INTERNAL_IPV4}' > /dev/null || {
+      echo "[CAPC] Error: Internal IP does not match the assigned private network IP range, Assigned IP: ${INTERNAL_IPV4}"
+      exit 1
     }
   
   - |

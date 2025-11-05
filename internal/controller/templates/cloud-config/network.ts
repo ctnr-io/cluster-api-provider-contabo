@@ -52,8 +52,13 @@ export const runcmd = [
 
     # Check that the internal ip is consistent with real assigned ip
     # Why? Some instance got assigned an ip that doesn't correspond to the real private network ip
-    ip route | grep 'eth' | grep '${internalIpv4Cidr}' | grep '${internalIpv4}' > /dev/null || {
-      echo "Warning: Internal IP is missing"
+    ip route | grep 'eth' | grep '${internalIpv4Cidr}' > /dev/null || {
+      echo "[CAPC] Error: Internal IP Cidr is missing, Private Network CIDR: ${internalIpv4Cidr}"
+      exit 1
+    }
+    ip route | grep 'eth' | grep '${internalIpv4}' > /dev/null || {
+      echo "[CAPC] Error: Internal IP does not match the assigned private network IP range, Assigned IP: ${internalIpv4}"
+      exit 1
     }
   `,
 ];

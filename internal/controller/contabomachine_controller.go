@@ -716,24 +716,34 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 			"instanceID", contaboMachine.Status.Instance.InstanceId,
 			"instanceIP", contaboMachine.Status.Instance.IpConfig.V4.Ip)
 
-		output, err := r.runMachineInstanceSshCommand(
+		cloudInitStatus, err := r.runMachineInstanceSshCommand(
 			ctx,
 			contaboMachine,
 			contaboCluster,
 			"cloud-init status",
 		)
-		if output == nil && err != nil {
+		if cloudInitStatus == nil && err != nil {
 			log.Info("SSH command failed, will retry", "error", err.Error(), "requeueAfter", "10s")
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
-		if output == nil {
+		if cloudInitStatus == nil {
 			log.Info("SSH command returned empty output, will retry", "requeueAfter", "10s")
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 		// Check if cloud-init finished successfully
-		if strings.Contains(*output, "status: error") {
+		if strings.Contains(*cloudInitStatus, "status: error") {
 			message := "cloud-init failed, check the /var/log/cloud-init.log and /var/log/cloud-init-output.log files on the instance for more details"
-			err := errors.New(*output)
+			// Try to find error from cloud-init logs
+			cloudInitLogsError, _ := r.runMachineInstanceSshCommand(
+				ctx,
+				contaboMachine,
+				contaboCluster,
+				"sudo cat /var/log/cloud-init.log | grep '[CAPC] Error'",
+			)
+			if cloudInitLogsError != nil && *cloudInitLogsError != "" {
+				message = "cloud-init error: " + strings.Split(*cloudInitLogsError, "[CAPC] Error")[1]
+			}
+			err := errors.New(message)
 			log.Error(err, message)
 			if err := r.resetInstance(ctx, contaboMachine, contaboMachine.Status.Instance, &message); err != nil {
 				log.Error(err, "Failed to reset instance after cloud-init failure",
@@ -742,8 +752,8 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, err
 		}
 
-		if strings.Contains(*output, "status: running") {
-			log.Info("cloud-init is still running, will retry", "output", *output, "requeueAfter", "20s")
+		if strings.Contains(*cloudInitStatus, "status: running") {
+			log.Info("cloud-init is still running, will retry", "output", *cloudInitStatus, "requeueAfter", "20s")
 			return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
 		}
 
