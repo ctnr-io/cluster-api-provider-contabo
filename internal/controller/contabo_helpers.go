@@ -226,11 +226,11 @@ func FormatDisplayName(contaboMachine *infrastructurev1beta2.ContaboMachine, con
 	return Truncate(fmt.Sprintf("[capc] %s %s", contaboCluster.Spec.ClusterUUID, hashSumStr), 255)
 }
 
-func FormatSshKeyName(contaboCluster *infrastructurev1beta2.ContaboCluster) string {
+func FormatSshKeyContaboName(contaboCluster *infrastructurev1beta2.ContaboCluster) string {
 	return Truncate(fmt.Sprintf("[capc] %s", contaboCluster.Spec.ClusterUUID), 255)
 }
 
-func FormatSshKeySecretName(contaboCluster *infrastructurev1beta2.ContaboCluster) string {
+func FormatSshKeyKubernetesName(contaboCluster *infrastructurev1beta2.ContaboCluster) string {
 	return Truncate(fmt.Sprintf("%s-cntb-sshkey", contaboCluster.Name), 253)
 }
 

@@ -404,12 +404,6 @@ var _ = Describe("Manager", Ordered, func() {
 				return workerContaboMachineName
 			}, 2*time.Minute, 5*time.Second).ShouldNot(BeEmpty())
 
-			By("verifying V76 product type is configured for control plane machine")
-			Eventually(func() string {
-				output, _ := kubectl("get", "contabomachine", controlPlaneContaboMachineName, "-n", testNamespace, "-o", "jsonpath={.spec.instance.productId}")
-				return output
-			}, 2*time.Minute, 5*time.Second).Should(Equal("V76"))
-
 			By("verifying ContaboCluster conditions are properly set")
 			checkConditions("contabocluster", "test-cluster")
 
@@ -559,6 +553,17 @@ var _ = Describe("Manager", Ordered, func() {
 				}
 				return output
 			}).Should(ContainSubstring("True True"))
+
+			// Try to run pod network connectivity test
+			By("running pod network connectivity test in workload cluster")
+			Eventually(func() bool {
+				cmd := exec.Command("kubectl", "--kubeconfig", kubeconfigPath, "run", "--rm", "utils", "-it", "--image", "arunvelsriram/utils", "--", "nslookup", "google.com")
+				output, err := utils.Run(cmd)
+				if err != nil {
+					return false
+				}
+				return !strings.Contains(output, "server can't find")
+			}).Should(BeTrue())
 
 			// Get the node names
 			By("getting the node names in workload cluster")

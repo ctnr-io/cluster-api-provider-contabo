@@ -1,0 +1,264 @@
+package controller
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"fmt"
+	"strings"
+	"time"
+
+	"golang.org/x/crypto/ssh"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
+	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/v1.0.0/models"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
+)
+
+// reconcileSSHKey ensures the SSH key exists and is configured
+func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	log.Info("Reconciling SSH key for ContaboCluster", "cluster", contaboCluster.Name)
+
+	if result, err := r.reconcileKubernetesSSHKeySecret(ctx, contaboCluster); err != nil || result.RequeueAfter != 0 {
+		return result, err
+	}
+
+	if result, err := r.reconcileContaboSSHKeySecret(ctx, contaboCluster); err != nil || result.RequeueAfter != 0 {
+		return result, err
+	}
+
+	meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.ClusterSshKeyReadyCondition,
+		Status: metav1.ConditionTrue,
+		Reason: infrastructurev1beta2.ClusterAvailableReason,
+	})
+
+	return ctrl.Result{}, nil
+}
+
+// reconcileKubernetesSSHKeySecret ensures the SSH key secret exists in Kubernetes
+func (r *ContaboClusterReconciler) reconcileKubernetesSSHKeySecret(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	sshKeyKubernetesName := FormatSshKeyKubernetesName(contaboCluster)
+
+	sshKeySecret := &corev1.Secret{}
+
+	// Check if secret already exists in Kubernetes
+	err := r.Get(ctx, client.ObjectKey{
+		Name:      sshKeyKubernetesName,
+		Namespace: contaboCluster.Namespace,
+	}, sshKeySecret)
+	if err != nil {
+		log.Info("SSH key secret not found in Kubernetes, creating new one", "secretName", sshKeyKubernetesName)
+
+		// Generate an ssh key pair
+		privateKey, publicKey, err := generateSSHKeyPair()
+		if err != nil {
+			return ctrl.Result{}, r.handleError(
+				ctx,
+				contaboCluster,
+				err,
+				infrastructurev1beta2.ClusterSshKeyReadyCondition,
+				infrastructurev1beta2.ClusterSshKeyFailedReason,
+				"Failed to generate SSH key pair",
+			)
+		}
+
+		// Create new secret
+		secretData := map[string][]byte{
+			"id_rsa":     []byte(privateKey),
+			"id_rsa.pub": []byte(publicKey),
+		}
+		err = r.Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      sshKeyKubernetesName,
+				Namespace: contaboCluster.Namespace,
+				Annotations: map[string]string{
+					clusterv1.ClusterNameAnnotation: contaboCluster.Name,
+				},
+				Labels: map[string]string{
+					clusterv1.ClusterNameLabel: contaboCluster.Name,
+					"component":                "ssh-key",
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: contaboCluster.APIVersion,
+						Kind:       contaboCluster.Kind,
+						Name:       contaboCluster.Name,
+						UID:        contaboCluster.UID,
+						Controller: ptr.To(true),
+					},
+				},
+			},
+			Type: clusterv1.ClusterSecretType,
+			Data: secretData,
+		})
+
+		if err != nil {
+			return ctrl.Result{}, r.handleError(
+				ctx,
+				contaboCluster,
+				err,
+				infrastructurev1beta2.ClusterSshKeyReadyCondition,
+				infrastructurev1beta2.ClusterSshKeyFailedReason,
+				"Failed to create SSH key secret",
+			)
+		}
+
+		// Requeue to allow time for the secret to be created
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// reconcileContaboSSHKeySecret ensures the SSH key exists in Contabo API
+func (r *ContaboClusterReconciler) reconcileContaboSSHKeySecret(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	var sshKey *models.SecretResponse
+	sshKeyContaboName := FormatSshKeyContaboName(contaboCluster)
+	sshKeyKubernetesName := FormatSshKeyKubernetesName(contaboCluster)
+
+	sshKeySecret := &corev1.Secret{}
+
+	// Retrieve the SSH key secret from Kubernetes
+	err := r.Get(ctx, client.ObjectKey{
+		Name:      sshKeyKubernetesName,
+		Namespace: contaboCluster.Namespace,
+	}, sshKeySecret)
+	if err != nil {
+		return ctrl.Result{}, r.handleError(
+			ctx,
+			contaboCluster,
+			err,
+			infrastructurev1beta2.ClusterSshKeyReadyCondition,
+			infrastructurev1beta2.ClusterSshKeyFailedReason,
+			"Failed to retrieve SSH key secret from Kubernetes",
+		)
+	}
+
+	log.Info("Found existing SSH key secret in Kubernetes", "secretName", sshKeyKubernetesName)
+
+	publicKey := string(sshKeySecret.Data["id_rsa.pub"])
+
+	// Check if SSH key with the same name already exists in Contabo API
+	resp, err := r.ContaboClient.RetrieveSecretListWithResponse(ctx, &models.RetrieveSecretListParams{
+		Name: &sshKeyContaboName,
+	})
+
+	if err != nil || resp.JSON200 == nil || resp.JSON200.Data == nil || len(resp.JSON200.Data) == 0 {
+		log.Info("SSH key not found in Contabo API, creating new one", "sshKeyContaboName", sshKeyContaboName)
+
+		// Create SSH key if not found
+		// Trim the public key for Contabo API (remove trailing newline)
+		trimmedPublicKey := strings.TrimSpace(publicKey)
+
+		sshKeyCreateResp, err := r.ContaboClient.CreateSecretWithResponse(ctx, &models.CreateSecretParams{}, models.CreateSecretRequest{
+			Name:  sshKeyContaboName,
+			Value: trimmedPublicKey,
+			Type:  "ssh",
+		})
+		if err != nil || sshKeyCreateResp.StatusCode() < 200 || sshKeyCreateResp.StatusCode() >= 300 {
+			return ctrl.Result{}, r.handleError(
+				ctx,
+				contaboCluster,
+				err,
+				infrastructurev1beta2.ClusterSshKeyReadyCondition,
+				infrastructurev1beta2.ClusterSshKeyFailedReason,
+				fmt.Sprintf("Failed to submit SSH public key to Contabo API: %s", sshKeyContaboName),
+			)
+		}
+
+		// Retrieve the created SSH key for further processing
+		sshKeyRetrieveResp, err := r.ContaboClient.RetrieveSecretWithResponse(ctx, int64(sshKeyCreateResp.JSON201.Data[0].SecretId), &models.RetrieveSecretParams{})
+		if err != nil || sshKeyRetrieveResp.StatusCode() < 200 || sshKeyRetrieveResp.StatusCode() >= 300 {
+			return ctrl.Result{}, r.handleError(
+				ctx,
+				contaboCluster,
+				err,
+				infrastructurev1beta2.ClusterSshKeyReadyCondition,
+				infrastructurev1beta2.ClusterSshKeyFailedReason,
+				"Failed to retrieve created SSH key from Contabo API",
+			)
+		}
+		// TODO: if there is any bootstraped machine already using old ssh key and is not he same as then new, we need to reset their ssh keys
+
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
+	log.Info("Found existing SSH key in Contabo API", "sshKeyContaboName", sshKeyContaboName)
+	sshKey = &resp.JSON200.Data[0]
+
+	// If kubernetes ssh key was created after this one, delete contabo one, and requeue
+	createdSSHKeyTime := sshKey.CreatedAt.UTC()
+	createdKubernetesSSHKeyTime := sshKeySecret.CreationTimestamp.UTC()
+
+	if createdKubernetesSSHKeyTime.After(createdSSHKeyTime) {
+		log.Info("Kubernetes SSH key is newer than Contabo SSH key, deleting Contabo SSH key", "sshKeyContaboName", sshKeyContaboName)
+		if _, err := r.ContaboClient.DeleteSecretWithResponse(ctx, int64(sshKey.SecretId), nil); err != nil {
+			return ctrl.Result{}, r.handleError(
+				ctx,
+				contaboCluster,
+				err,
+				infrastructurev1beta2.ClusterSshKeyReadyCondition,
+				infrastructurev1beta2.ClusterSshKeyFailedReason,
+				"Failed to delete old SSH key from Contabo API",
+			)
+		}
+		// Requeue to allow time for the deletion to propagate
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
+	// Update status with SSH key info
+	contaboCluster.Status.SshKey = &infrastructurev1beta2.ContaboSshKeyStatus{
+		Name:     sshKey.Name,
+		SecretId: int64(sshKey.SecretId),
+		Value:    sshKey.Value,
+	}
+
+	log.Info("SSH key reconciled", "sshKeyContaboName", sshKey.Name, "sshKeyId", sshKey.SecretId)
+
+	return ctrl.Result{}, nil
+}
+
+// generateSSHKeyPair generates a new RSA SSH key pair and returns the public and private keys as strings
+func generateSSHKeyPair() (string, string, error) {
+	// generate private key
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", "", err
+	}
+
+	// write private key as PEM
+	var privKeyBuf strings.Builder
+
+	privateKeyPEM := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)}
+	if err := pem.Encode(&privKeyBuf, privateKeyPEM); err != nil {
+		return "", "", err
+	}
+
+	// generate and write public key
+	pub, err := ssh.NewPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		return "", "", err
+	}
+
+	var pubKeyBuf strings.Builder
+	pubKeyBuf.Write(ssh.MarshalAuthorizedKey(pub))
+
+	return privKeyBuf.String(), pubKeyBuf.String(), nil
+}

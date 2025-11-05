@@ -1145,7 +1145,7 @@ func (r *ContaboMachineReconciler) runMachineInstanceSshCommand(ctx context.Cont
 	sshKeySecret := &corev1.Secret{}
 	sshKeySecretMetadata := client.ObjectKey{
 		Namespace: contaboMachine.Namespace,
-		Name:      FormatSshKeySecretName(contaboCluster),
+		Name:      FormatSshKeyKubernetesName(contaboCluster),
 	}
 	if err := r.Get(ctx, sshKeySecretMetadata, sshKeySecret); err != nil {
 		return nil, fmt.Errorf("failed to get SSH private key secret %s/%s: %v", sshKeySecretMetadata.Namespace, sshKeySecretMetadata.Name, err)
@@ -1357,7 +1357,7 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMac
 
 	// Reinstall to clear any residual configuration
 	_, err = r.ContaboClient.ReinstallInstance(ctx, instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
-		ImageId: DefaultUbuntuImageID,
+		ImageId:     DefaultUbuntuImageID,
 		DefaultUser: ptr.To(models.ReinstallInstanceRequestDefaultUserAdmin),
 	})
 	if err != nil {

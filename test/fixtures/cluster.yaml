@@ -6,7 +6,7 @@ metadata:
   namespace: contabo-e2e-test
 spec:
   controlPlaneEndpoint:
-    host: vmi2535330.contaboserver.net
+    host: vmi2510653.contaboserver.net
     port: 6443
   privateNetwork:
     region: EU
@@ -62,8 +62,7 @@ spec:
   template:
     spec:
       instance:
-        name: vmi2535330
-        productId: V76
+        name: vmi2510653
         provisioningType: ReuseOnly
 ---
 apiVersion: controlplane.cluster.x-k8s.io/v1beta1

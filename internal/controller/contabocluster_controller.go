@@ -19,8 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"net"
-	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -42,20 +40,7 @@ import (
 
 	infrastructurev1beta2 "github.com/ctnr-io/cluster-api-provider-contabo/api/v1beta2"
 	contaboclient "github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/v1.0.0/client"
-	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/v1.0.0/models"
 	"github.com/google/uuid"
-
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
-	"encoding/pem"
-
-	"golang.org/x/crypto/ssh"
-
-	corev1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/utils/ptr"
 )
 
 // ContaboClusterReconciler reconciles a ContaboCluster object
@@ -124,7 +109,7 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// Handle deleted clusters
 	if !contaboCluster.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, contaboCluster)
+		return r.reconcileDelete(ctx, contaboCluster), nil
 	}
 
 	// Handle non-deleted clusters
@@ -139,13 +124,13 @@ func (r *ContaboClusterReconciler) reconcileApply(ctx context.Context, contaboCl
 	r.ensureClusterUUID(ctx, contaboCluster)
 
 	// Check if private network was created
-	if err := r.reconcilePrivateNetwork(ctx, contaboCluster); err != nil {
+	if result, err := r.reconcilePrivateNetwork(ctx, contaboCluster); err != nil || result.RequeueAfter != 0 {
 		return ctrl.Result{}, err
 	}
 
 	// Check if SSH key was created
-	if err := r.reconcileSSHKey(ctx, contaboCluster); err != nil {
-		return ctrl.Result{}, err
+	if result, err := r.reconcileSSHKey(ctx, contaboCluster); err != nil || result.RequeueAfter != 0 {
+		return result, err
 	}
 
 	// Mark cluster infrastructure as ready after private network and SSH keys are created
@@ -220,545 +205,8 @@ func (r *ContaboClusterReconciler) ensureClusterUUID(ctx context.Context, contab
 	return clusterUUID
 }
 
-// reconcilePrivateNetwork ensures the private network exists and is configured
-func (r *ContaboClusterReconciler) reconcilePrivateNetwork(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
-	log := logf.FromContext(ctx)
-
-	log.Info("Reconciling private network for ContaboCluster", "cluster", contaboCluster.Name)
-
-	// Check if private network was created
-	if contaboCluster.Status.PrivateNetwork == nil {
-		var privateNetwork *models.PrivateNetworkResponse
-		privateNetworkName := FormatPrivateNetworkName(contaboCluster)
-
-		// Check if private network with the same name already exists in Contabo API
-		resp, _ := r.ContaboClient.RetrievePrivateNetworkListWithResponse(ctx, &models.RetrievePrivateNetworkListParams{
-			Name: &privateNetworkName,
-		})
-
-		if resp != nil && resp.JSON200 != nil && resp.JSON200.Data != nil && len(resp.JSON200.Data) > 0 {
-			privateNetwork = (*models.PrivateNetworkResponse)(&resp.JSON200.Data[0])
-		} else {
-			log.Info("Private network not found in Contabo API, creating new one", "privateNetworkName", privateNetworkName)
-
-			// Create private network if not found
-			description := "Private network created by Cluster API Provider Contabo"
-			privateNetworkCreateResp, err := r.ContaboClient.CreatePrivateNetworkWithResponse(ctx, nil, models.CreatePrivateNetworkJSONRequestBody{
-				Name:        privateNetworkName,
-				Description: &description,
-				Region:      &contaboCluster.Spec.PrivateNetwork.Region,
-			})
-			if err != nil || privateNetworkCreateResp.StatusCode() < 200 || privateNetworkCreateResp.StatusCode() >= 300 {
-				return r.handleError(
-					ctx,
-					contaboCluster,
-					err,
-					infrastructurev1beta2.ClusterPrivateNetworkReadyCondition,
-					infrastructurev1beta2.ClusterPrivateNetworkFailedReason,
-					"Failed to create private network",
-				)
-			}
-
-			privateNetwork = &privateNetworkCreateResp.JSON201.Data[0]
-		}
-		// Update status with private network info
-		contaboCluster.Status.PrivateNetwork = &infrastructurev1beta2.ContaboPrivateNetworkStatus{
-			Name:             privateNetwork.Name,
-			PrivateNetworkId: privateNetwork.PrivateNetworkId,
-			Region:           privateNetwork.Region,
-			AvailableIps:     privateNetwork.AvailableIps,
-			Cidr:             privateNetwork.Cidr,
-			CreatedDate:      privateNetwork.CreatedDate.UTC().Unix(),
-			Instances:        []infrastructurev1beta2.Instances{},
-			CustomerId:       privateNetwork.CustomerId,
-			TenantId:         privateNetwork.TenantId,
-			Description:      privateNetwork.Description,
-			DataCenter:       privateNetwork.DataCenter,
-			RegionName:       privateNetwork.RegionName,
-		}
-		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
-			Type:   infrastructurev1beta2.ClusterPrivateNetworkReadyCondition,
-			Status: metav1.ConditionTrue,
-			Reason: infrastructurev1beta2.ClusterAvailableReason,
-		})
-		log.Info("Using private network", "privateNetworkName", privateNetwork.Name, "privateNetworkId", privateNetwork.PrivateNetworkId)
-	}
-	// else {
-	// TODO: Check if private network configuration matches spec and update if necessary
-	// }
-
-	return nil
-}
-
-// reconcileSSHKey ensures the SSH key exists and is configured
-func (r *ContaboClusterReconciler) reconcileSSHKey(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
-	log := logf.FromContext(ctx)
-
-	log.Info("Reconciling SSH key for ContaboCluster", "cluster", contaboCluster.Name)
-
-	// Check if SSH key was created
-	if contaboCluster.Status.SshKey == nil {
-		var sshKey *models.SecretResponse
-		sshKeyName := FormatSshKeyName(contaboCluster)
-		sshKeySecretName := FormatSshKeySecretName(contaboCluster)
-
-		// Check if SSH key with the same name already exists in Contabo API
-		resp, _ := r.ContaboClient.RetrieveSecretListWithResponse(ctx, &models.RetrieveSecretListParams{
-			Name: &sshKeyName,
-		})
-
-		if resp != nil && resp.JSON200 != nil && resp.JSON200.Data != nil && len(resp.JSON200.Data) > 0 {
-			sshKey = &resp.JSON200.Data[0]
-		} else {
-			log.Info("SSH key not found in Contabo API, creating new one", "sshKeyName", sshKeyName)
-
-			// Generate an ssh key pair
-			privateKey, publicKey, err := generateSSHKeyPair()
-			if err != nil {
-				return r.handleError(
-					ctx,
-					contaboCluster,
-					err,
-					infrastructurev1beta2.ClusterSshKeyReadyCondition,
-					infrastructurev1beta2.ClusterSshKeyFailedReason,
-					"Failed to generate SSH key pair",
-				)
-			}
-
-			// Delete secret if already exists
-			err = r.Get(ctx, client.ObjectKey{
-				Name:      sshKeySecretName,
-				Namespace: contaboCluster.Namespace,
-			}, &corev1.Secret{})
-			if err == nil {
-				// Secret already exists, delete it first
-				err = r.Delete(ctx, &corev1.Secret{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      sshKeySecretName,
-						Namespace: contaboCluster.Namespace,
-					},
-				})
-				if err != nil {
-					return r.handleError(
-						ctx,
-						contaboCluster,
-						err,
-						infrastructurev1beta2.ClusterSshKeyReadyCondition,
-						infrastructurev1beta2.ClusterSshKeyFailedReason,
-						"Failed to delete existing SSH key secret",
-					)
-				}
-			}
-
-			// Create new secret
-			secretData := map[string][]byte{
-				"id_rsa":     []byte(privateKey),
-				"id_rsa.pub": []byte(publicKey),
-			}
-
-			// Verify data integrity before storing in secret
-			log.Info("Storing SSH keys in Kubernetes secret",
-				"secretName", sshKeySecretName)
-
-			if err := r.Create(ctx, &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      sshKeySecretName,
-					Namespace: contaboCluster.Namespace,
-					Annotations: map[string]string{
-						clusterv1.ClusterNameAnnotation: contaboCluster.Name,
-					},
-					Labels: map[string]string{
-						clusterv1.ClusterNameLabel: contaboCluster.Name,
-						"component":                "ssh-key",
-					},
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion: contaboCluster.APIVersion,
-							Kind:       contaboCluster.Kind,
-							Name:       contaboCluster.Name,
-							UID:        contaboCluster.UID,
-							Controller: ptr.To(true),
-						},
-					},
-				},
-				Type: clusterv1.ClusterSecretType,
-				Data: secretData,
-			}); err != nil {
-				return r.handleError(
-					ctx,
-					contaboCluster,
-					err,
-					infrastructurev1beta2.ClusterSshKeyReadyCondition,
-					infrastructurev1beta2.ClusterSshKeyFailedReason,
-					"Failed to create SSH key secret",
-				)
-			}
-
-			// Create SSH key if not found
-			// Trim the public key for Contabo API (remove trailing newline)
-			trimmedPublicKey := strings.TrimSpace(publicKey)
-
-			// Log public key formatting for Contabo API
-			log.Info("Submitting SSH public key to Contabo API",
-				"sshKeyName", sshKeyName)
-
-			sshKeyCreateResp, err := r.ContaboClient.CreateSecretWithResponse(ctx, &models.CreateSecretParams{}, models.CreateSecretRequest{
-				Name:  sshKeyName,
-				Value: trimmedPublicKey,
-				Type:  "ssh",
-			})
-			if err != nil || sshKeyCreateResp.StatusCode() < 200 || sshKeyCreateResp.StatusCode() >= 300 {
-				return r.handleError(
-					ctx,
-					contaboCluster,
-					err,
-					infrastructurev1beta2.ClusterSshKeyReadyCondition,
-					infrastructurev1beta2.ClusterSshKeyFailedReason,
-					fmt.Sprintf("Failed to submit SSH public key to Contabo API: %s", sshKeyName),
-				)
-			}
-			sshKey = &sshKeyCreateResp.JSON201.Data[0]
-		}
-
-		// Update status with SSH key info
-		contaboCluster.Status.SshKey = &infrastructurev1beta2.ContaboSshKeyStatus{
-			Name:     sshKey.Name,
-			SecretId: int64(sshKey.SecretId),
-			Value:    sshKey.Value,
-		}
-		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
-			Type:   infrastructurev1beta2.ClusterSshKeyReadyCondition,
-			Status: metav1.ConditionTrue,
-			Reason: infrastructurev1beta2.ClusterAvailableReason,
-		})
-		log.Info("Using SSH key", "sshKeyName", sshKey.Name, "sshKeyId", sshKey.SecretId)
-	}
-	// else {
-	// TODO: Check if SSH key configuration matches spec and update if necessary
-	// }
-
-	return nil
-}
-
-// reconcileControlPlaneEndpoint ensures the control plane endpoint is set
-func (r *ContaboClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
-
-	log.Info("Reconciling control plane endpoint for ContaboCluster", "cluster", contaboCluster.Name)
-
-	meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
-		Type:   clusterv1.ClusterControlPlaneAvailableCondition,
-		Status: metav1.ConditionTrue,
-		Reason: clusterv1.ClusterControlPlaneMachinesReadyReason,
-	})
-
-	// Retrieve control plane endpoint from the first ContaboMachine in the cluster
-	controlPlaneMachines := &infrastructurev1beta2.ContaboMachineList{}
-	if err := r.List(ctx, controlPlaneMachines, client.InNamespace(contaboCluster.Namespace), client.MatchingLabels{clusterv1.ClusterNameLabel: contaboCluster.Name}, client.HasLabels{clusterv1.MachineControlPlaneLabel}); err != nil || len(controlPlaneMachines.Items) == 0 {
-		log.Info("No control plane machines found yet, requeuing")
-		meta.SetStatusCondition(&contaboCluster.Status.Conditions, metav1.Condition{
-			Type:   clusterv1.ClusterControlPlaneAvailableCondition,
-			Status: metav1.ConditionFalse,
-			Reason: clusterv1.WaitingForControlPlaneInitializedReason,
-		})
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-	}
-
-	// reconcile controlplane endpoint service and endpoint slices for the control plane endpoint
-	if err := r.reconcileControlPlaneService(ctx, contaboCluster); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	if err := r.reconcileControlPlaneEndpointSlices(ctx, contaboCluster, controlPlaneMachines); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	return ctrl.Result{}, nil
-}
-
-func (r *ContaboClusterReconciler) reconcileControlPlaneService(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
-	log := logf.FromContext(ctx)
-
-	// Service name must match the control plane endpoint host for DNS resolution
-	serviceName := fmt.Sprintf("%s-apiserver", contaboCluster.Name)
-	service := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      serviceName,
-			Namespace: contaboCluster.Namespace,
-			Annotations: map[string]string{
-				clusterv1.ClusterNameAnnotation: contaboCluster.Name,
-			},
-			Labels: map[string]string{
-				clusterv1.ClusterNameLabel: contaboCluster.Name,
-				"component":                "apiserver",
-			},
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: contaboCluster.APIVersion,
-					Kind:       contaboCluster.Kind,
-					Name:       contaboCluster.Name,
-					UID:        contaboCluster.UID,
-					Controller: ptr.To(true),
-				},
-			},
-		},
-		Spec: corev1.ServiceSpec{
-			Type:      corev1.ServiceTypeClusterIP,
-			ClusterIP: "None", // Headless service
-			Ports: []corev1.ServicePort{
-				{
-					Name:     "https",
-					Port:     contaboCluster.Spec.ControlPlaneEndpoint.Port,
-					Protocol: corev1.ProtocolTCP,
-				},
-			},
-		},
-	}
-
-	// Try to get existing service
-	existingService := &corev1.Service{}
-	err := r.Get(ctx, client.ObjectKey{
-		Name:      serviceName,
-		Namespace: contaboCluster.Namespace,
-	}, existingService)
-
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			// Create the service
-			log.Info("Creating control plane endpoint service", "serviceName", serviceName)
-			if err := r.Create(ctx, service); err != nil {
-				return fmt.Errorf("failed to create control plane endpoint service: %w", err)
-			}
-			log.Info("Created control plane endpoint service", "serviceName", serviceName)
-		} else {
-			return fmt.Errorf("failed to get control plane endpoint service: %w", err)
-		}
-	} else {
-		// Update the service if needed
-		existingService.Spec.Ports = service.Spec.Ports
-		log.Info("Updating control plane endpoint service", "serviceName", serviceName)
-		if err := r.Update(ctx, existingService); err != nil {
-			return fmt.Errorf("failed to update control plane endpoint service: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func (r *ContaboClusterReconciler) reconcileControlPlaneEndpointSlices(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster, controlPlaneContaboMachineList *infrastructurev1beta2.ContaboMachineList) error {
-	log := logf.FromContext(ctx)
-
-	// Service name must match the control plane endpoint host for DNS resolution
-	serviceName := fmt.Sprintf("%s-apiserver", contaboCluster.Name)
-	endpointSliceV4Name := fmt.Sprintf("%s-ipv4-apiserver", contaboCluster.Name)
-	endpointSliceV6Name := fmt.Sprintf("%s-ipv6-apiserver", contaboCluster.Name)
-
-	// Collect all control plane instance IPs
-	var endpointsV4 []discoveryv1.Endpoint
-	var endpointsV6 []discoveryv1.Endpoint
-	for _, machine := range controlPlaneContaboMachineList.Items {
-		if machine.Status.Instance != nil && machine.Status.Instance.IpConfig.V4.Ip != "" {
-			endpointsV4 = append(endpointsV4, discoveryv1.Endpoint{
-				Addresses: []string{machine.Status.Instance.IpConfig.V4.Ip},
-				Conditions: discoveryv1.EndpointConditions{
-					Ready: ptr.To(true),
-				},
-			})
-		}
-		if machine.Status.Instance != nil && machine.Status.Instance.IpConfig.V6.Ip != "" {
-			// Convert from 2001:0db8:85a3:0000:0000:0000:0000:0001 to 2001:db8:85a3::1
-			canonicalIpV6 := net.ParseIP(machine.Status.Instance.IpConfig.V6.Ip).String()
-			endpointsV6 = append(endpointsV6, discoveryv1.Endpoint{
-				Addresses: []string{canonicalIpV6},
-				Conditions: discoveryv1.EndpointConditions{
-					Ready: ptr.To(true),
-				},
-			})
-		}
-	}
-
-	endpointPort := contaboCluster.Spec.ControlPlaneEndpoint.Port
-
-	endpointSliceV4 := &discoveryv1.EndpointSlice{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      endpointSliceV4Name,
-			Namespace: contaboCluster.Namespace,
-			Annotations: map[string]string{
-				clusterv1.ClusterNameAnnotation: contaboCluster.Name,
-			},
-			Labels: map[string]string{
-				clusterv1.ClusterNameLabel:   contaboCluster.Name,
-				"component":                  "apiserver",
-				discoveryv1.LabelServiceName: serviceName,
-				discoveryv1.LabelManagedBy:   "cluster-api-provider-contabo",
-			},
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: contaboCluster.APIVersion,
-					Kind:       contaboCluster.Kind,
-					Name:       contaboCluster.Name,
-					UID:        contaboCluster.UID,
-					Controller: ptr.To(true),
-				},
-			},
-		},
-		AddressType: discoveryv1.AddressTypeIPv4,
-		Endpoints:   endpointsV4,
-		Ports: []discoveryv1.EndpointPort{
-			{
-				Name:     ptr.To("https"),
-				Port:     ptr.To(endpointPort),
-				Protocol: ptr.To(corev1.ProtocolTCP),
-			},
-		},
-	}
-
-	endpointSliceV6 := &discoveryv1.EndpointSlice{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      endpointSliceV6Name,
-			Namespace: contaboCluster.Namespace,
-			Annotations: map[string]string{
-				clusterv1.ClusterNameAnnotation: contaboCluster.Name,
-			},
-			Labels: map[string]string{
-				clusterv1.ClusterNameLabel:   contaboCluster.Name,
-				"component":                  "apiserver",
-				discoveryv1.LabelServiceName: serviceName,
-				discoveryv1.LabelManagedBy:   "cluster-api-provider-contabo",
-			},
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: contaboCluster.APIVersion,
-					Kind:       contaboCluster.Kind,
-					Name:       contaboCluster.Name,
-					UID:        contaboCluster.UID,
-					Controller: ptr.To(true),
-				},
-			},
-		},
-		AddressType: discoveryv1.AddressTypeIPv6,
-		Endpoints:   endpointsV6,
-		Ports: []discoveryv1.EndpointPort{
-			{
-				Name:     ptr.To("https"),
-				Port:     ptr.To(endpointPort),
-				Protocol: ptr.To(corev1.ProtocolTCP),
-			},
-		},
-	}
-
-	// Try to get existing endpoint slice v4
-	existingEndpointSliceV4 := &discoveryv1.EndpointSlice{}
-	err := r.Get(ctx, client.ObjectKey{
-		Name:      endpointSliceV4Name,
-		Namespace: contaboCluster.Namespace,
-	}, existingEndpointSliceV4)
-
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			// Create the endpoint slice
-			log.Info("Creating control plane endpoint slice", "endpointSliceV4Name", endpointSliceV4Name, "endpointCount", len(endpointsV4))
-			if err := r.Create(ctx, endpointSliceV4); err != nil {
-				return fmt.Errorf("failed to create control plane endpoint slice: %w", err)
-			}
-			log.Info("Created control plane endpoint slice", "endpointSliceV4Name", endpointSliceV4Name)
-		} else {
-			return fmt.Errorf("failed to get control plane endpoint slice: %w", err)
-		}
-	} else {
-		// Update the endpoint slice if needed
-		existingEndpointSliceV4.Endpoints = endpointSliceV4.Endpoints
-		existingEndpointSliceV4.Ports = endpointSliceV4.Ports
-		log.Info("Updating control plane endpoint slice", "endpointSliceV4Name", endpointSliceV4Name, "endpointCount", len(endpointsV4))
-		if err := r.Update(ctx, existingEndpointSliceV4); err != nil {
-			return fmt.Errorf("failed to update control plane endpoint slice: %w", err)
-		}
-	}
-
-	// Try to get existing endpoint slice v6
-	existingEndpointSliceV6 := &discoveryv1.EndpointSlice{}
-	err = r.Get(ctx, client.ObjectKey{
-		Name:      endpointSliceV6Name,
-		Namespace: contaboCluster.Namespace,
-	}, existingEndpointSliceV6)
-
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			// Create the endpoint slice
-			log.Info("Creating control plane endpoint slice", "endpointSliceV6Name", endpointSliceV6Name, "endpointCount", len(endpointsV6))
-			if err := r.Create(ctx, endpointSliceV6); err != nil {
-				return fmt.Errorf("failed to create control plane endpoint slice: %w", err)
-			}
-			log.Info("Created control plane endpoint slice", "endpointSliceV6Name", endpointSliceV6Name)
-		} else {
-			return fmt.Errorf("failed to get control plane endpoint slice: %w", err)
-		}
-	} else {
-		// Update the endpoint slice if needed
-		existingEndpointSliceV6.Endpoints = endpointSliceV6.Endpoints
-		existingEndpointSliceV6.Ports = endpointSliceV6.Ports
-		log.Info("Updating control plane endpoint slice", "endpointSliceV6Name", endpointSliceV6Name, "endpointCount", len(endpointsV6))
-		if err := r.Update(ctx, existingEndpointSliceV6); err != nil {
-			return fmt.Errorf("failed to update control plane endpoint slice: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func (r *ContaboClusterReconciler) deleteControlPlaneService(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
-	log := logf.FromContext(ctx)
-
-	// Service name matches the control plane endpoint host
-	serviceName := fmt.Sprintf("%s-apiserver", contaboCluster.Name)
-
-	service := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      serviceName,
-			Namespace: contaboCluster.Namespace,
-		},
-	}
-
-	err := r.Delete(ctx, service)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Info("Control plane endpoint service already deleted", "serviceName", serviceName)
-			return nil
-		}
-		return fmt.Errorf("failed to delete control plane endpoint service: %w", err)
-	}
-
-	log.Info("Deleted control plane endpoint service", "serviceName", serviceName)
-	return nil
-}
-
-func (r *ContaboClusterReconciler) deleteControlPlaneEndpointSlices(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) error {
-	log := logf.FromContext(ctx)
-
-	endpointSliceName := fmt.Sprintf("%s-apiserver", contaboCluster.Name)
-
-	endpointSlice := &discoveryv1.EndpointSlice{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      endpointSliceName,
-			Namespace: contaboCluster.Namespace,
-		},
-	}
-
-	err := r.Delete(ctx, endpointSlice)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Info("Control plane endpoint slice already deleted", "endpointSliceName", endpointSliceName)
-			return nil
-		}
-		return fmt.Errorf("failed to delete control plane endpoint slice: %w", err)
-	}
-
-	log.Info("Deleted control plane endpoint slice", "endpointSliceName", endpointSliceName)
-	return nil
-}
-
 // reconcileDelete may return different ctrl.Result values in future implementations
-func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
+func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) ctrl.Result {
 	log := logf.FromContext(ctx)
 
 	log.Info("Reconciling ContaboCluster delete")
@@ -837,11 +285,11 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 		}
 
 		// Update status to remove SSH key
-		sshKeyName := contaboCluster.Status.SshKey.Name
+		sshKeyContaboName := contaboCluster.Status.SshKey.Name
 		contaboCluster.Status.SshKey = nil
 		// This fail with conflict
 		// meta.RemoveStatusCondition(&contaboCluster.Status.Conditions, infrastructurev1beta2.ClusterSshKeyReadyCondition)
-		log.Info("Deleted SSH key", "name", sshKeyName)
+		log.Info("Deleted SSH key", "name", sshKeyContaboName)
 	}
 
 	// Remove our finalizer from the list and update it if there is no more contabomachines
@@ -857,7 +305,7 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 	if len(contaboMachineList.Items) > 0 {
 		err := fmt.Errorf("there are still %d ContaboMachines in the cluster", len(contaboMachineList.Items))
 		log.Error(err, "There are still ContaboMachines in the cluster, requeuing deletion", "contaboMachines", len(contaboMachineList.Items))
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		return ctrl.Result{RequeueAfter: 10 * time.Second}
 	}
 
 	// Rmeove controlplane service and endpointslices
@@ -873,7 +321,7 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 	log.Info("No more ContaboMachines in the cluster, removing finalizer")
 	controllerutil.RemoveFinalizer(contaboCluster, infrastructurev1beta2.ClusterFinalizer)
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{}
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -889,34 +337,6 @@ func (r *ContaboClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		).
 		Named("contabocluster").
 		Complete(r)
-}
-
-// generateSSHKeyPair generates a new RSA SSH key pair and returns the public and private keys as strings
-func generateSSHKeyPair() (string, string, error) {
-	// generate private key
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return "", "", err
-	}
-
-	// write private key as PEM
-	var privKeyBuf strings.Builder
-
-	privateKeyPEM := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)}
-	if err := pem.Encode(&privKeyBuf, privateKeyPEM); err != nil {
-		return "", "", err
-	}
-
-	// generate and write public key
-	pub, err := ssh.NewPublicKey(&privateKey.PublicKey)
-	if err != nil {
-		return "", "", err
-	}
-
-	var pubKeyBuf strings.Builder
-	pubKeyBuf.Write(ssh.MarshalAuthorizedKey(pub))
-
-	return privKeyBuf.String(), pubKeyBuf.String(), nil
 }
 
 // handleError centralizes error handling with status condition, logging, event recording, and patching
