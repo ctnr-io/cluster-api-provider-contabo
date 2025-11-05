@@ -16,7 +16,7 @@ export const writeFiles: WriteFiles = [
       ip route \
         | grep 'eth' \
         | grep -v default \
-        | grep -v '${internalIpv4Cidr}' \
+        | grep -v '${internalIpv4}' \
         | cut -d' ' -f1 \
         | xargs -r -n1 sudo ip route del
     `,
@@ -53,8 +53,7 @@ export const runcmd = [
     # Check that the internal ip is consistent with real assigned ip
     # Why? Some instance got assigned an ip that doesn't correspond to the real private network ip
     ip route | grep 'eth' | grep '${internalIpv4Cidr}' | grep '${internalIpv4}' > /dev/null || {
-      echo "Error: Internal IP is missing or does not match the assigned private network IP range"
-      # exit 1
+      echo "Warning: Internal IP is missing"
     }
   `,
 ];

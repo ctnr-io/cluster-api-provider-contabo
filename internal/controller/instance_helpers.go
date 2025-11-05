@@ -255,7 +255,7 @@ func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, c
 		instance := contaboMachine.Status.Instance
 		contaboMachine.Status.Instance = nil
 
-		return ctrl.Result{}, r.handleError(
+		return ctrl.Result{RequeueAfter: 5*time.Second}, r.handleError(
 			ctx,
 			contaboMachine,
 			errors.New(*instance.ErrorMessage),

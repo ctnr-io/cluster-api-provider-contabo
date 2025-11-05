@@ -725,7 +725,7 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 				log.Error(err, "Failed to reset instance after cloud-init failure",
 					"instanceID", contaboMachine.Status.Instance.InstanceId)
 			}
-			return ctrl.Result{}, err
+			return ctrl.Result{RequeueAfter: 5*time.Second}, err
 		}
 
 		if strings.Contains(*output, "status: running") {
@@ -815,31 +815,7 @@ func (r *ContaboMachineReconciler) initializeNode(ctx context.Context, machine *
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 
-		node, err := k8sClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				log.Info("Node not found in cluster yet, will retry", "nodeName", nodeName)
-				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-			}
-			log.Info("Node not found in cluster, kubelet seems not ready, will retry", "nodeName", nodeName)
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-
-		// Find Ready condition
-		var readyCondition *corev1.NodeCondition
-		for _, cond := range node.Status.Conditions {
-			if cond.Type == corev1.NodeReady {
-				readyCondition = &cond
-				break
-			}
-		}
-		// Check if node is ready
-		if readyCondition == nil || readyCondition.Status != corev1.ConditionTrue {
-			log.Info("Node is not ready yet, will retry", "nodeName", nodeName)
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-
-		log.Info("Node found in cluster, updating external ips",
+		log.Info("Node found in cluster, updating ips",
 			"nodeName", nodeName,
 			"instanceID", contaboMachine.Status.Instance.InstanceId)
 
@@ -872,14 +848,14 @@ func (r *ContaboMachineReconciler) initializeNode(ctx context.Context, machine *
 
 		_, err = k8sClient.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status")
 		if err != nil {
-			log.Error(err, "Failed to patch node with external IPs", "nodeName", nodeName)
+			log.Error(err, "Failed to patch node with IPs", "nodeName", nodeName)
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 
 		log.Info("Successfully patched node with IPs", "nodeName", nodeName, "ips", addresses)
 
 		// Set node providerId and Remove unitialized taint if present
-		node, err = k8sClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		node, err := k8sClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				log.Info("Node not found in cluster yet, will retry", "nodeName", nodeName)
@@ -1268,17 +1244,6 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMac
 	hasErrorMessage := errorMessage != nil || (instance != nil && instance.ErrorMessage != nil)
 
 	// Set error on contabo machine status
-	if hasErrorMessage {
-		log.Info("Instance marked with error message, updating ContaboMachine status")
-		if errorMessage != nil {
-			contaboMachine.Status.FailureMessage = errorMessage
-			contaboMachine.Status.FailureReason = ptr.To("ControllerError")
-		} else {
-			contaboMachine.Status.FailureMessage = instance.ErrorMessage
-			contaboMachine.Status.FailureReason = ptr.To("InstanceErrorMessage")
-		}
-	}
-
 	if instance == nil {
 		log.Info("Instance is nil, nothing to reset")
 		return nil
