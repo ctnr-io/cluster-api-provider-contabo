@@ -83,6 +83,9 @@ spec:
                 description: PrivateNetwork specifies the private network configuration
                   for the cluster.
                 properties:
+                  name:
+                    description: Name is the name of the private network
+                    type: string
                   region:
                     description: Region Region where the Private Network should be
                       located. Default is `EU`

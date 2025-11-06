@@ -69,6 +69,9 @@ spec:
           spec:
             description: spec defines the desired state of ContaboCluster
             properties:
+              clusterUUID:
+                description: ClusterUUID is the identifier of the Contabo cluster.
+                type: string
               controlPlaneEndpoint:
                 description: ControlPlaneEndpoint represents the endpoint used to
                   communicate with the control plane.
@@ -90,6 +93,9 @@ spec:
                 description: PrivateNetwork specifies the private network configuration
                   for the cluster.
                 properties:
+                  name:
+                    description: Name is the name of the private network
+                    type: string
                   region:
                     description: Region Region where the Private Network should be
                       located. Default is `EU`
@@ -103,9 +109,6 @@ spec:
           status:
             description: status defines the observed state of ContaboCluster
             properties:
-              clusterUUID:
-                description: ClusterUUID is the identifier of the Contabo cluster.
-                type: string
               conditions:
                 description: Conditions defines current service state of the ContaboCluster.
                 items:

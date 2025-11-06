@@ -21,6 +21,9 @@ func (r *ContaboClusterReconciler) reconcilePrivateNetwork(ctx context.Context, 
 
 	// Check if private network was created
 	privateNetworkName := FormatPrivateNetworkName(contaboCluster)
+	if contaboCluster.Spec.PrivateNetwork.Name != "" {
+		privateNetworkName = contaboCluster.Spec.PrivateNetwork.Name
+	}
 
 	// Check if private network with the same name already exists in Contabo API
 	resp, err := r.ContaboClient.RetrievePrivateNetworkListWithResponse(ctx, &models.RetrievePrivateNetworkListParams{

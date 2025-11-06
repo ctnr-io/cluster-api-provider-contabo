@@ -69,6 +69,9 @@ type ContaboPrivateNetworkSpec struct {
 	// Region Region where the Private Network should be located. Default is `EU`
 	// +kubebuilder:validation:Required
 	Region string `json:"region"`
+	// Name is the name of the private network
+	// +optional
+	Name string `json:"name,omitempty"`
 }
 
 // ContaboPrivateNetworkStatus defines the observed state of a Contabo private network
