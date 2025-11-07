@@ -31,6 +31,16 @@ export const writeFiles: WriteFiles = [
       net.ipv6.conf.all.forwarding = 1
     `,
   },
+  {
+    // Increase the maximum number of open files
+    path: "/etc/sysctl.d/99-max-open-files.conf",
+    owner: "root:root",
+    permissions: "0644",
+    content: tag("conf")`
+      fs.inotify.max_user_instances = 512
+      fs.inotify.max_user_watches = 1048576
+    `,
+  }
 ];
 
 export const runcmd: RunCmd = [

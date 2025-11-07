@@ -45,6 +45,12 @@ write_files:
     net.bridge.bridge-nf-call-ip6tables = 1
     net.ipv4.ip_forward                 = 1
     net.ipv6.conf.all.forwarding = 1
+- path: /etc/sysctl.d/99-max-open-files.conf
+  owner: 'root:root'
+  permissions: '0644'
+  content: |-
+    fs.inotify.max_user_watches=524288
+    fs.inotify.max_user_instances=512
 - path: /etc/cron.d/etcd-backup
   owner: 'root:root'
   permissions: '0644'
