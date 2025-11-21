@@ -638,6 +638,12 @@ func (r *ContaboMachineReconciler) reconcileContaboMachineAddresses(ctx context.
 func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
+	// Validate instance status before bootstrapping
+	result, err := r.validateInstanceStatus(ctx, contaboMachine)
+	if err != nil || result.RequeueAfter > 0 {
+		return result, err
+	}
+
 	// Get and validate bootstrap data
 	bootstrapData, result, err := r.getBootstrapData(ctx, machine, contaboMachine, contaboCluster)
 	if err != nil || result.RequeueAfter > 0 {
@@ -699,6 +705,18 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 			}
 			log.Info("Reinstall instance request sent successfully",
 				"instanceId", contaboMachine.Status.Instance.InstanceId)
+		}
+
+		// Refresh instance status after reinstall
+		instanceResp, err := r.ContaboClient.RetrieveInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, nil)
+		if err == nil && instanceResp.StatusCode() >= 200 && instanceResp.StatusCode() < 300 {
+			contaboMachine.Status.Instance = convertInstanceResponseData(&instanceResp.JSON200.Data[0])
+		}
+
+		// Validate instance status after reinstall
+		result, err := r.validateInstanceStatus(ctx, contaboMachine)
+		if err != nil || result.RequeueAfter > 0 {
+			return result, err
 		}
 	}
 
