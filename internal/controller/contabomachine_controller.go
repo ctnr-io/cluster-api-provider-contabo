@@ -683,10 +683,6 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 				RootPassword: nil,
 				UserData:     &bootstrapData,
 			})
-			// Force display name back because sometimes Contabo change it during reinstall
-			_, _ = r.ContaboClient.PatchInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, nil, models.PatchInstanceRequest{
-				DisplayName: &contaboMachine.Status.Instance.DisplayName,
-			})
 			if err != nil || resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
 				meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
 					Type:   infrastructurev1beta2.InstanceBootstrapCondition,
@@ -1352,10 +1348,6 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMac
 	_, err = r.ContaboClient.ReinstallInstance(ctx, instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
 		ImageId:     DefaultUbuntuImageID,
 		DefaultUser: ptr.To(models.ReinstallInstanceRequestDefaultUserAdmin),
-	})
-	// Force update display name because contabo sometimes keep the old one after reinstall
-	_, _ = r.ContaboClient.PatchInstanceWithResponse(ctx, instance.InstanceId, nil, models.PatchInstanceRequest{
-		DisplayName: &displayName,
 	})
 	if err != nil {
 		log.Error(err, "Failed to reinstall instance after unassigning private network",
