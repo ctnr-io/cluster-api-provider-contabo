@@ -51,6 +51,29 @@ func (r *ContaboMachineReconciler) getExistingInstance(
 	return nil, nil
 }
 
+// getUsedInstanceNames returns a map of instance names that are currently in use by ContaboMachines
+func (r *ContaboMachineReconciler) getUsedInstanceNames(ctx context.Context) (map[string]*infrastructurev1beta2.ContaboMachine, error) {
+	log := logf.FromContext(ctx)
+	usedNames := make(map[string]*infrastructurev1beta2.ContaboMachine)
+
+	// List all ContaboMachines across all namespaces
+	var contaboMachineList infrastructurev1beta2.ContaboMachineList
+	if err := r.List(ctx, &contaboMachineList); err != nil {
+		log.Error(err, "Failed to list ContaboMachines")
+		return nil, fmt.Errorf("failed to list ContaboMachines: %w", err)
+	}
+
+	// Build a map of instance names that are in use
+	for _, machine := range contaboMachineList.Items {
+		if machine.Spec.Instance.Name != nil && *machine.Spec.Instance.Name != "" {
+			usedNames[*machine.Spec.Instance.Name] = &machine
+		}
+	}
+
+	log.V(1).Info("Found used instance names", "count", len(usedNames), "names", usedNames)
+	return usedNames, nil
+}
+
 // findReusableInstance looks for available instances that can be reused
 func (r *ContaboMachineReconciler) findReusableInstance(
 	ctx context.Context,
@@ -61,6 +84,12 @@ func (r *ContaboMachineReconciler) findReusableInstance(
 	displayNameEmpty := ""
 	page := int64(1)
 	size := int64(100)
+
+	// Get map of instance names already in use by other ContaboMachines
+	usedInstanceNames, err := r.getUsedInstanceNames(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get used instance names: %w", err)
+	}
 
 	for {
 		resp, err := r.ContaboClient.RetrieveInstancesListWithResponse(ctx, &models.RetrieveInstancesListParams{
@@ -97,19 +126,33 @@ func (r *ContaboMachineReconciler) findReusableInstance(
 				return nil, nil
 			}
 
-			// Find instance with empty display name
+			// Find instance with empty display name that is not already in use
 			for i := range resp.JSON200.Data {
-				if resp.JSON200.Data[i].DisplayName == displayNameEmpty && resp.JSON200.Data[i].CancelDate == nil {
-					instance := convertListInstanceResponseData(&resp.JSON200.Data[i])
+				instance := &resp.JSON200.Data[i]
 
-					// Reset the instance by removing any private network assignments
-					if err := r.resetInstance(ctx, contaboMachine, instance, nil); err != nil {
-						log.Error(err, "Failed to reset instance",
-							"instanceID", instance.InstanceId)
-						continue
-					}
-					return instance, nil
+				// Check if instance has empty display name and is not cancelled
+				if instance.DisplayName != displayNameEmpty || instance.CancelDate != nil {
+					continue
 				}
+
+				// Check that no other ContaboMachine is using this instance name
+				if usedInstanceNames[instance.Name] != nil && usedInstanceNames[instance.Name].UID != contaboMachine.UID {
+					log.V(1).Info("Skipping instance with name already in use by another ContaboMachine",
+						"instanceID", instance.InstanceId,
+						"instanceName", instance.Name)
+					continue
+				}
+
+				convertedInstance := convertListInstanceResponseData(instance)
+
+				// Reset the instance by removing any private network assignments
+				if err := r.resetInstance(ctx, contaboMachine, convertedInstance, nil); err != nil {
+					log.Error(err, "Failed to reset instance",
+						"instanceID", convertedInstance.InstanceId)
+					continue
+				}
+
+				return convertedInstance, nil
 			}
 		}
 
