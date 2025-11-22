@@ -33,6 +33,10 @@ type ContaboMachineSpec struct {
 
 	// Instance is the type of instance to create.
 	Instance ContaboInstanceSpec `json:"instance"`
+
+	// Index is the index of the machine in the machine deployment.
+	// +optional
+	Index *int32 `json:"index,omitempty"`
 }
 
 // ContaboMachineStatus defines the observed state of ContaboMachine.
