@@ -222,6 +222,11 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 	contaboMachine.Spec.ProviderID = nil
 	contaboMachine.Status.Ready = false
 	contaboMachine.Status.Available = false
+	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.InstanceReadyCondition,
+		Status: metav1.ConditionFalse,
+		Reason: "",
+	})
 
 	// Provision the instance for CAPI
 	result, err := r.provisionInstance(ctx, contaboMachine, contaboCluster)
@@ -257,17 +262,26 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 	contaboMachine.Status.Ready = true
 
 	// Bootstrap the instance if not already done
-	if !contaboMachine.Status.Available {
-		// Validate instance status
-		result, err := r.bootstrapInstance(ctx, machine, contaboMachine, contaboCluster)
-		if err != nil {
-			return result, err
-		}
-		if result.RequeueAfter > 0 {
-			return result, nil
-		}
-		contaboMachine.Status.Available = true
+	// Validate instance status
+	result, err = r.bootstrapInstance(ctx, machine, contaboMachine, contaboCluster)
+	if err != nil {
+		return result, err
 	}
+	if result.RequeueAfter > 0 {
+		return result, nil
+	}
+
+	contaboMachine.Status.Available = true
+
+	// Update ContaboMachine status with instance details
+	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.InstanceReadyCondition,
+		Status: metav1.ConditionTrue,
+		Reason: infrastructurev1beta2.InstanceReadyReason,
+	})
+	log.Info("Instance is ready",
+		"instanceID", contaboMachine.Status.Instance.InstanceId,
+		"instanceIP", contaboMachine.Status.Instance.IpConfig.V4.Ip)
 
 	// ContaboMachine is ready
 	return ctrl.Result{}, nil
@@ -657,59 +671,59 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 	// TODO: upgrade instance if product id is not the same
 
 	// Reinstall instance with cloud-init bootstrap data if not already done
-	condition := meta.FindStatusCondition(contaboMachine.Status.Conditions, infrastructurev1beta2.InstanceBootstrapCondition)
-	if condition == nil || condition.Reason == infrastructurev1beta2.InstanceReinstallingFailedReason {
-		meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
-			Type:   infrastructurev1beta2.InstanceBootstrapCondition,
-			Status: metav1.ConditionFalse,
-			Reason: infrastructurev1beta2.InstanceReinstallingReason,
+	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+		Type:   infrastructurev1beta2.InstanceBootstrapCondition,
+		Status: metav1.ConditionFalse,
+		Reason: infrastructurev1beta2.InstanceReinstallingReason,
+	})
+	// Retrieve SSH key IDs
+	sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
+
+	// Required for clusterctl move to not reinstall instances again
+	log.Info("Check if instance is already reinstalled with bootstrap userdata by checking its cluster uuid", "instanceID", contaboMachine.Status.Instance.InstanceId)
+	output, err := r.runMachineInstanceSshCommand(
+		ctx,
+		contaboMachine,
+		contaboCluster,
+		"sudo cat /etc/cluster-uuid",
+	)
+	if err != nil {
+		log.Info("SSH command failed, will retrying...", "error", err.Error())
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	} else if output != nil && strings.TrimSpace(*output) == contaboCluster.Spec.ClusterUUID {
+		log.Info("Instance already has the correct clusterUUID, skipping reinstall",
+			"instanceID", contaboMachine.Status.Instance.InstanceId)
+	} else {
+		// Reinstall instance with cloud-init bootstrap data
+		log.Info("Reinstalling instance with SSH keys and bootstrap data",
+			"instanceId", contaboMachine.Status.Instance.InstanceId,
+			"sshKeyIds", sshKeys,
+			"defaultUser", contaboMachine.Status.Instance.DefaultUser,
+			"imageId", contaboMachine.Status.Instance.ImageId)
+
+		resp, err := r.ContaboClient.ReinstallInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
+			SshKeys:      &sshKeys,
+			DefaultUser:  ptr.To(models.ReinstallInstanceRequestDefaultUserAdmin),
+			ImageId:      contaboMachine.Status.Instance.ImageId,
+			RootPassword: nil,
+			UserData:     &bootstrapData,
 		})
-		// Retrieve SSH key IDs
-		sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
-
-		// Required for clusterctl move to not reinstall instances again
-		log.Info("Check if instance is already reinstalled by checking its cluster uuid", "instanceID", contaboMachine.Status.Instance.InstanceId)
-		output, err := r.runMachineInstanceSshCommand(
-			ctx,
-			contaboMachine,
-			contaboCluster,
-			"sudo cat /etc/cluster-uuid",
-		)
-		if err == nil && output != nil && strings.TrimSpace(*output) == contaboCluster.Spec.ClusterUUID {
-			log.Info("Instance already has the correct clusterUUID, skipping reinstall",
-				"instanceID", contaboMachine.Status.Instance.InstanceId)
-		} else {
-			// Reinstall instance with cloud-init bootstrap data
-			log.Info("Reinstalling instance with SSH keys and bootstrap data",
-				"instanceId", contaboMachine.Status.Instance.InstanceId,
-				"sshKeyIds", sshKeys,
-				"defaultUser", contaboMachine.Status.Instance.DefaultUser,
-				"imageId", contaboMachine.Status.Instance.ImageId)
-
-			resp, err := r.ContaboClient.ReinstallInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
-				SshKeys:      &sshKeys,
-				DefaultUser:  ptr.To(models.ReinstallInstanceRequestDefaultUserAdmin),
-				ImageId:      contaboMachine.Status.Instance.ImageId,
-				RootPassword: nil,
-				UserData:     &bootstrapData,
+		if err != nil || resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
+			meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+				Type:   infrastructurev1beta2.InstanceBootstrapCondition,
+				Status: metav1.ConditionFalse,
+				Reason: infrastructurev1beta2.InstanceReinstallingFailedReason,
 			})
-			if err != nil || resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
-				meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
-					Type:   infrastructurev1beta2.InstanceBootstrapCondition,
-					Status: metav1.ConditionFalse,
-					Reason: infrastructurev1beta2.InstanceReinstallingFailedReason,
-				})
-				return ctrl.Result{RequeueAfter: 30 * time.Second}, r.handleError(
-					ctx,
-					contaboMachine,
-					err,
-					infrastructurev1beta2.InstanceReinstallingFailedReason,
-					fmt.Sprintf("Failed to reinstall instance, statusCode: %d", resp.StatusCode()),
-				)
-			}
-			log.Info("Reinstall instance request sent successfully",
-				"instanceId", contaboMachine.Status.Instance.InstanceId)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.handleError(
+				ctx,
+				contaboMachine,
+				err,
+				infrastructurev1beta2.InstanceReinstallingFailedReason,
+				fmt.Sprintf("Failed to reinstall instance, statusCode: %d", resp.StatusCode()),
+			)
 		}
+		log.Info("Reinstall instance request sent successfully",
+			"instanceId", contaboMachine.Status.Instance.InstanceId)
 
 		// Refresh instance status after reinstall
 		instanceResp, err := r.ContaboClient.RetrieveInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, nil)
@@ -718,7 +732,7 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 		}
 
 		// Validate instance status after reinstall
-		result, err := r.validateInstanceStatus(ctx, contaboMachine)
+		result, err = r.validateInstanceStatus(ctx, contaboMachine)
 		if err != nil || result.RequeueAfter > 0 {
 			return result, err
 		}
@@ -730,58 +744,54 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 		Status: metav1.ConditionFalse,
 		Reason: infrastructurev1beta2.InstanceWaitingForCloudInitReason,
 	})
-	condition = meta.FindStatusCondition(contaboMachine.Status.Conditions, infrastructurev1beta2.InstanceBootstrapCondition)
-	if condition.Reason == infrastructurev1beta2.InstanceWaitingForCloudInitReason {
-		// Wait for cloud-init to finish
+	// Wait for cloud-init to finish
+	log.Info("Waiting for cloud-init to finish on instance",
+		"instanceID", contaboMachine.Status.Instance.InstanceId,
+		"instanceIP", contaboMachine.Status.Instance.IpConfig.V4.Ip)
 
-		log.Info("Waiting for cloud-init to finish on instance",
-			"instanceID", contaboMachine.Status.Instance.InstanceId,
-			"instanceIP", contaboMachine.Status.Instance.IpConfig.V4.Ip)
-
-		cloudInitStatus, err := r.runMachineInstanceSshCommand(
+	cloudInitStatus, err := r.runMachineInstanceSshCommand(
+		ctx,
+		contaboMachine,
+		contaboCluster,
+		"cloud-init status",
+	)
+	if cloudInitStatus == nil && err != nil {
+		log.Info("SSH command failed, will retry", "error", err.Error(), "requeueAfter", "10s")
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+	if cloudInitStatus == nil {
+		log.Info("SSH command returned empty output, will retry", "requeueAfter", "10s")
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+	// Check if cloud-init finished successfully
+	if strings.Contains(*cloudInitStatus, "status: error") {
+		message := "cloud-init failed, check the /var/log/cloud-init.log and /var/log/cloud-init-output.log files on the instance for more details"
+		// Try to find error from cloud-init logs
+		cloudInitLogsError, _ := r.runMachineInstanceSshCommand(
 			ctx,
 			contaboMachine,
 			contaboCluster,
-			"cloud-init status",
+			"sudo cat /var/log/cloud-init-output.log | grep '[CAPC] Error'",
 		)
-		if cloudInitStatus == nil && err != nil {
-			log.Info("SSH command failed, will retry", "error", err.Error(), "requeueAfter", "10s")
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		if cloudInitLogsError != nil && *cloudInitLogsError != "" {
+			message = "cloud-init error: " + strings.Split(*cloudInitLogsError, "[CAPC] Error")[1]
 		}
-		if cloudInitStatus == nil {
-			log.Info("SSH command returned empty output, will retry", "requeueAfter", "10s")
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		err := errors.New(message)
+		log.Error(err, message)
+		if err := r.resetInstance(ctx, contaboMachine, contaboMachine.Status.Instance, &message); err != nil {
+			log.Error(err, "Failed to reset instance after cloud-init failure",
+				"instanceID", contaboMachine.Status.Instance.InstanceId)
 		}
-		// Check if cloud-init finished successfully
-		if strings.Contains(*cloudInitStatus, "status: error") {
-			message := "cloud-init failed, check the /var/log/cloud-init.log and /var/log/cloud-init-output.log files on the instance for more details"
-			// Try to find error from cloud-init logs
-			cloudInitLogsError, _ := r.runMachineInstanceSshCommand(
-				ctx,
-				contaboMachine,
-				contaboCluster,
-				"sudo cat /var/log/cloud-init-output.log | grep '[CAPC] Error'",
-			)
-			if cloudInitLogsError != nil && *cloudInitLogsError != "" {
-				message = "cloud-init error: " + strings.Split(*cloudInitLogsError, "[CAPC] Error")[1]
-			}
-			err := errors.New(message)
-			log.Error(err, message)
-			if err := r.resetInstance(ctx, contaboMachine, contaboMachine.Status.Instance, &message); err != nil {
-				log.Error(err, "Failed to reset instance after cloud-init failure",
-					"instanceID", contaboMachine.Status.Instance.InstanceId)
-			}
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, err
-		}
-
-		if strings.Contains(*cloudInitStatus, "status: running") {
-			log.Info("cloud-init is still running, will retry", "output", *cloudInitStatus, "requeueAfter", "20s")
-			return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
-		}
-
-		log.Info("cloud-init has finished on instance",
-			"instanceID", contaboMachine.Status.Instance.InstanceId)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, err
 	}
+
+	if strings.Contains(*cloudInitStatus, "status: running") {
+		log.Info("cloud-init is still running, will retry", "output", *cloudInitStatus, "requeueAfter", "20s")
+		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
+	}
+
+	log.Info("cloud-init has finished on instance",
+		"instanceID", contaboMachine.Status.Instance.InstanceId)
 
 	if result, err := r.initializeNode(ctx, machine, contaboMachine, contaboCluster); err != nil || result.RequeueAfter > 0 {
 		return result, err
@@ -792,22 +802,6 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 		Status: metav1.ConditionTrue,
 		Reason: infrastructurev1beta2.InstanceBootstrapedReason,
 	})
-
-	// Update ContaboMachine status with instance details
-	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
-		Type:   infrastructurev1beta2.InstanceReadyCondition,
-		Status: metav1.ConditionTrue,
-		Reason: infrastructurev1beta2.InstanceReadyReason,
-	})
-	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
-		Type:   clusterv1.ReadyCondition,
-		Status: metav1.ConditionTrue,
-		Reason: clusterv1.ReadyReason,
-	})
-
-	log.Info("Instance is ready",
-		"instanceID", contaboMachine.Status.Instance.InstanceId,
-		"instanceIP", contaboMachine.Status.Instance.IpConfig.V4.Ip)
 
 	return ctrl.Result{}, nil
 }
@@ -828,108 +822,105 @@ func (r *ContaboMachineReconciler) initializeNode(ctx context.Context, machine *
 		Status: metav1.ConditionFalse,
 		Reason: infrastructurev1beta2.InstanceConfigureNodeReason,
 	})
-	condition := meta.FindStatusCondition(contaboMachine.Status.Conditions, infrastructurev1beta2.InstanceBootstrapCondition)
-	if condition.Reason == infrastructurev1beta2.InstanceConfigureNodeReason {
-		log.Info("Waiting for node to exists in the cluster",
-			"instanceID", contaboMachine.Status.Instance.InstanceId,
-			"instanceIP", contaboMachine.Status.Instance.IpConfig.V4.Ip)
+	log.Info("Waiting for node to exists in the cluster",
+		"instanceID", contaboMachine.Status.Instance.InstanceId,
+		"instanceIP", contaboMachine.Status.Instance.IpConfig.V4.Ip)
 
-		kubeconfig, err := r.getKubeconfig(ctx, contaboCluster)
-		if err != nil {
-			log.Info("Waiting to get kubeconfig from owner Cluster",
-				"clusterName", machine.Spec.ClusterName,
-				"namespace", machine.Namespace)
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-
-		config, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
-		if err != nil {
-			log.Error(err, "Failed to create REST config from kubeconfig")
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-
-		k8sClient, err := kubernetes.NewForConfig(config)
-		if err != nil {
-			log.Error(err, "Failed to create Kubernetes client from REST config")
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-
-		nodeName, err := ParseProviderID(*contaboMachine.Spec.ProviderID)
-		if err != nil {
-			log.Error(err, "Failed to parse node name from provider ID",
-				"providerID", *contaboMachine.Spec.ProviderID)
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-
-		log.Info("Node found in cluster, updating ips",
-			"nodeName", nodeName,
-			"instanceID", contaboMachine.Status.Instance.InstanceId)
-
-		// Build a map to deduplicate addresses by (Type, Address)
-		// Collect all addresses
-		addresses := []corev1.NodeAddress{}
-		for _, addr := range contaboMachine.Status.Addresses {
-			addresses = append(addresses, corev1.NodeAddress{
-				Type:    corev1.NodeAddressType(addr.Type),
-				Address: addr.Address,
-			})
-		}
-
-		// Patch node with merged addresses
-		patchNode := &corev1.Node{
-			Status: corev1.NodeStatus{
-				Addresses: addresses,
-			},
-		}
-
-		patchBytes, err := json.Marshal(patchNode)
-		if err != nil {
-			log.Error(err, "Failed to marshal node status patch")
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-
-		log.Info("Patching node with IP addresses",
-			"nodeName", nodeName,
-			"ips", addresses)
-
-		_, err = k8sClient.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status")
-		if err != nil {
-			log.Error(err, "Failed to patch node with IPs", "nodeName", nodeName)
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-
-		log.Info("Successfully patched node with IPs", "nodeName", nodeName, "ips", addresses)
-
-		// Set node providerId and Remove unitialized taint if present
-		node, err := k8sClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				log.Info("Node not found in cluster yet, will retry", "nodeName", nodeName)
-				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-			}
-			log.Info("Node not found in cluster, kubelet seems not ready, will retry", "nodeName", nodeName)
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-
-		node.Spec.ProviderID = BuildProviderID(contaboMachine.Status.Instance.Name)
-
-		taintRemoved := false
-		for i, taint := range node.Spec.Taints {
-			if taint.Key == "node.cloudprovider.kubernetes.io/uninitialized" {
-				node.Spec.Taints = append(node.Spec.Taints[:i], node.Spec.Taints[i+1:]...)
-				taintRemoved = true
-				break
-			}
-		}
-		if taintRemoved {
-			_, err = k8sClient.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
-			if err != nil {
-				log.Error(err, "Failed to initialize node", "nodeName", nodeName)
-				return ctrl.Result{}, fmt.Errorf("failed to initialize node %s: %w", nodeName, err)
-			}
-		}
-		log.Info("Successfully initialize node", "nodeName", nodeName)
+	kubeconfig, err := r.getKubeconfig(ctx, contaboCluster)
+	if err != nil {
+		log.Info("Waiting to get kubeconfig from owner Cluster",
+			"clusterName", machine.Spec.ClusterName,
+			"namespace", machine.Namespace)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
+
+	config, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
+	if err != nil {
+		log.Error(err, "Failed to create REST config from kubeconfig")
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	k8sClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		log.Error(err, "Failed to create Kubernetes client from REST config")
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	nodeName, err := ParseProviderID(*contaboMachine.Spec.ProviderID)
+	if err != nil {
+		log.Error(err, "Failed to parse node name from provider ID",
+			"providerID", *contaboMachine.Spec.ProviderID)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	log.Info("Node found in cluster, updating ips",
+		"nodeName", nodeName,
+		"instanceID", contaboMachine.Status.Instance.InstanceId)
+
+	// Build a map to deduplicate addresses by (Type, Address)
+	// Collect all addresses
+	addresses := []corev1.NodeAddress{}
+	for _, addr := range contaboMachine.Status.Addresses {
+		addresses = append(addresses, corev1.NodeAddress{
+			Type:    corev1.NodeAddressType(addr.Type),
+			Address: addr.Address,
+		})
+	}
+
+	// Patch node with merged addresses
+	patchNode := &corev1.Node{
+		Status: corev1.NodeStatus{
+			Addresses: addresses,
+		},
+	}
+
+	patchBytes, err := json.Marshal(patchNode)
+	if err != nil {
+		log.Error(err, "Failed to marshal node status patch")
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	log.Info("Patching node with IP addresses",
+		"nodeName", nodeName,
+		"ips", addresses)
+
+	_, err = k8sClient.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status")
+	if err != nil {
+		log.Error(err, "Failed to patch node with IPs", "nodeName", nodeName)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	log.Info("Successfully patched node with IPs", "nodeName", nodeName, "ips", addresses)
+
+	// Set node providerId and Remove unitialized taint if present
+	node, err := k8sClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("Node not found in cluster yet, will retry", "nodeName", nodeName)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+		log.Info("Node not found in cluster, kubelet seems not ready, will retry", "nodeName", nodeName)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	node.Spec.ProviderID = BuildProviderID(contaboMachine.Status.Instance.Name)
+
+	taintRemoved := false
+	for i, taint := range node.Spec.Taints {
+		if taint.Key == "node.cloudprovider.kubernetes.io/uninitialized" {
+			node.Spec.Taints = append(node.Spec.Taints[:i], node.Spec.Taints[i+1:]...)
+			taintRemoved = true
+			break
+		}
+	}
+	if taintRemoved {
+		_, err = k8sClient.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
+		if err != nil {
+			log.Error(err, "Failed to initialize node", "nodeName", nodeName)
+			return ctrl.Result{}, fmt.Errorf("failed to initialize node %s: %w", nodeName, err)
+		}
+	}
+	log.Info("Successfully initialize node", "nodeName", nodeName)
 
 	return ctrl.Result{}, nil
 }
@@ -1230,10 +1221,19 @@ func (r *ContaboMachineReconciler) runMachineInstanceSshCommand(ctx context.Cont
 		isAuthError := strings.Contains(errStr, "unable to authenticate") || strings.Contains(errStr, "no supported methods remain")
 		isNetworkError := strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "timeout")
 
+		// Update ssh key of the contabo machine auth failed
 		if isAuthError {
-			return nil, fmt.Errorf("SSH authentication failed after trying user %s: %v",
-				user, err)
-		} else if isNetworkError {
+			log.Info("SSH connection method issue, update instance ssh key", "host", host, "user", user)
+			sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
+			_, err := r.ContaboClient.ResetPasswordAction(ctx, contaboMachine.Status.Instance.InstanceId, nil, models.InstancesResetPasswordActionsRequest{
+				SshKeys: &sshKeys,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to update instance SSH keys after connection method issue: %v", err)
+			}
+			return nil, fmt.Errorf("SSH authentication failed to %s with user %s: %v", host, currentUser, err)
+		}
+		if isNetworkError {
 			return nil, fmt.Errorf("SSH network connection failed to %s (instance may not be ready): %v", host, err)
 		}
 		return nil, fmt.Errorf("SSH connection failed to %s: %v", host, err)
@@ -1256,7 +1256,8 @@ func (r *ContaboMachineReconciler) runMachineInstanceSshCommand(ctx context.Cont
 	// Run the command and capture output
 	output, err := session.CombinedOutput(command)
 	if err != nil {
-		return ptr.To(string(output)), fmt.Errorf("command exited with error: output: %s, error: %v", string(output), err)
+		log.Info("SSH command execution failed", "command", command, "error", err.Error())
+		return ptr.To(string(output)), nil
 	}
 	return ptr.To(string(output)), nil
 }
