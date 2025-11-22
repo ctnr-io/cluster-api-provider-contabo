@@ -215,32 +215,36 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 		return result, nil
 	}
 
-	// Provision the instance for CAPI
-	if contaboMachine.Status.Initialization == nil || !contaboMachine.Status.Initialization.Provisioned {
-		result, err := r.provisionInstance(ctx, contaboMachine, contaboCluster)
-		if err != nil {
-			contaboMachine.Status.Initialization = &infrastructurev1beta2.ContaboMachineInitializationStatus{
-				Provisioned:  false,
-				ErrorMessage: ptr.To(err.Error()),
-			}
-			return result, err
-		}
-		if result.RequeueAfter > 0 {
-			contaboMachine.Status.Initialization = &infrastructurev1beta2.ContaboMachineInitializationStatus{
-				Provisioned:  false,
-				ErrorMessage: nil,
-			}
-			return result, nil
-		}
-		contaboMachine.Status.Initialization = &infrastructurev1beta2.ContaboMachineInitializationStatus{
-			Provisioned: true,
-		}
-
-		// Set provider ID for CAPI
-		contaboMachine.Spec.ProviderID = ptr.To(BuildProviderID(contaboMachine.Status.Instance.Name))
-
-		return ctrl.Result{}, nil
+	contaboMachine.Status.Initialization = &infrastructurev1beta2.ContaboMachineInitializationStatus{
+		Provisioned:  false,
+		ErrorMessage: nil,
 	}
+	contaboMachine.Spec.ProviderID = nil
+	contaboMachine.Status.Ready = false
+	contaboMachine.Status.Available = false
+
+	// Provision the instance for CAPI
+	result, err := r.provisionInstance(ctx, contaboMachine, contaboCluster)
+	if err != nil {
+		contaboMachine.Status.Initialization = &infrastructurev1beta2.ContaboMachineInitializationStatus{
+			Provisioned:  false,
+			ErrorMessage: ptr.To(err.Error()),
+		}
+		return result, err
+	}
+	if result.RequeueAfter > 0 {
+		contaboMachine.Status.Initialization = &infrastructurev1beta2.ContaboMachineInitializationStatus{
+			Provisioned:  false,
+			ErrorMessage: nil,
+		}
+		return result, nil
+	}
+	contaboMachine.Status.Initialization = &infrastructurev1beta2.ContaboMachineInitializationStatus{
+		Provisioned: true,
+	}
+
+	// Set provider ID for CAPI
+	contaboMachine.Spec.ProviderID = ptr.To(BuildProviderID(contaboMachine.Status.Instance.Name))
 
 	// Update machine address for CAPI machine
 	if len(contaboMachine.Status.Addresses) == 0 {
