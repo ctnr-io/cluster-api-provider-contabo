@@ -69,6 +69,8 @@ type ContaboMachineReconciler struct {
 	ContaboClient *contaboclient.ClientWithResponses
 	// instanceReuseMutex protects against concurrent instance reuse
 	instanceReuseMutex sync.Mutex
+	// indexAssignmentMutex protects against concurrent index assignment
+	indexAssignmentMutex sync.Mutex
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=contabomachines,verbs=get;list;watch;create;update;patch;delete
@@ -312,6 +314,12 @@ func (r *ContaboMachineReconciler) setupContaboMachine(ctx context.Context, mach
 			"label", clusterv1.ClusterNameLabel)
 	}
 
+	// Assign a unique index to this machine within the cluster
+	if err := r.assignMachineIndex(ctx, contaboMachine, machine.Spec.ClusterName); err != nil {
+		log.Error(err, "Failed to assign machine index")
+		return ctrl.Result{RequeueAfter: 10 * time.Second}
+	}
+
 	// Check if cluster private network is ready
 	if contaboCluster.Status.PrivateNetwork == nil || meta.IsStatusConditionFalse(contaboCluster.Status.Conditions, infrastructurev1beta2.ClusterPrivateNetworkReadyCondition) {
 		log.Info("Waiting for cluster private network to be ready")
@@ -481,13 +489,7 @@ func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, con
 	// Try to find existing instance
 	instance, err := r.getExistingInstance(ctx, contaboMachine, contaboCluster)
 	if err != nil {
-		return ctrl.Result{}, r.handleError(
-			ctx,
-			contaboMachine,
-			err,
-			infrastructurev1beta2.InstanceNotFoundReason,
-			"Failed to find existing instance",
-		)
+		return ctrl.Result{}, fmt.Errorf("failed to find existing instance: %w", err)
 	}
 	if instance != nil {
 		contaboMachine.Status.Instance = instance
@@ -512,11 +514,11 @@ func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, con
 		instance, err = r.createNewInstance(ctx, contaboMachine, contaboCluster)
 		if err != nil {
 			log.Error(err, "Failed to create new instance")
-			// Do not return error to avoid requeue storm, it would permit to create multiple instances rapidly
 			// Set Failure condition instead
 			contaboMachine.Status.FailureReason = ptr.To(string(infrastructurev1beta2.InstanceCreatingReason))
 			contaboMachine.Status.FailureMessage = ptr.To("Failed to create new instance: " + err.Error())
-			return ctrl.Result{}, nil
+			// Return error to prevent calling validateInstanceStatus with nil instance
+			return ctrl.Result{}, fmt.Errorf("failed to create new instance: %w", err)
 		}
 		if instance != nil {
 			contaboMachine.Status.Instance = instance

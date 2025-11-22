@@ -17,8 +17,7 @@ limitations under the License.
 package controller
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,6 +29,8 @@ import (
 	"github.com/ctnr-io/cluster-api-provider-contabo/pkg/contabo/v1.0.0/models"
 	"github.com/google/uuid"
 	"go.yaml.in/yaml/v2"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -215,15 +216,18 @@ func Truncate[T []any | string](s T, maxLength int) T {
 }
 
 func FormatDisplayName(contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) string {
-	// Create an hash based on the name and namespace to ensure uniqueness
-	name := fmt.Sprintf("%s-%s", contaboMachine.Namespace, contaboMachine.Name)
-	hash := sha256.New()
-	hash.Write([]byte(name))
-	hashSum := hash.Sum(nil) // Use first 6 bytes of the hash for brevity
-	// Format as hex string
-	hashSumStr := hex.EncodeToString(hashSum)[:32]
-	// Return the formatted display name
-	return Truncate(fmt.Sprintf("[capc] %s %s", contaboCluster.Spec.ClusterUUID, hashSumStr), 255)
+	// Determine role-based name
+	var roleName string
+	if _, isControlPlane := contaboMachine.Labels[clusterv1.MachineControlPlaneLabel]; isControlPlane {
+		roleName = "control-plane"
+	} else if poolName, hasPool := contaboMachine.Labels[clusterv1.MachineDeploymentNameLabel]; hasPool {
+		roleName = poolName
+	} else {
+		roleName = "worker"
+	}
+
+	// Format: [capc] <clusterUUID> <role>-<index>
+	return Truncate(fmt.Sprintf("[capc] %s %s-%d", contaboCluster.Spec.ClusterUUID, roleName, *contaboMachine.Spec.Index), 255)
 }
 
 func FormatSshKeyContaboName(contaboCluster *infrastructurev1beta2.ContaboCluster) string {
@@ -236,4 +240,95 @@ func FormatSshKeyKubernetesName(contaboCluster *infrastructurev1beta2.ContaboClu
 
 func FormatPrivateNetworkName(contaboCluster *infrastructurev1beta2.ContaboCluster) string {
 	return Truncate(fmt.Sprintf("[capc] %s", contaboCluster.Spec.ClusterUUID), 255)
+}
+
+// assignMachineIndex assigns a unique index to a ContaboMachine within its cluster
+// This function is thread-safe and ensures no duplicate indexes are assigned
+// It indexes machines separately based on:
+// - Control-plane vs worker role
+// - For workers: MachineDeployment pool name
+// - Instance spec (ProductID)
+// This ensures control-plane-0, control-plane-1, worker-pool-a-0, worker-pool-a-1, etc.
+func (r *ContaboMachineReconciler) assignMachineIndex(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, clusterName string) error {
+	// Lock to prevent concurrent index assignment
+	r.indexAssignmentMutex.Lock()
+	defer r.indexAssignmentMutex.Unlock()
+
+	// If index is already assigned, nothing to do
+	if contaboMachine.Spec.Index != nil {
+		return nil
+	}
+
+	// Determine the role, pool name, and product ID for grouping
+	isControlPlane := false
+	poolName := ""
+	if contaboMachine.Labels != nil {
+		if _, exists := contaboMachine.Labels["cluster.x-k8s.io/control-plane"]; exists {
+			isControlPlane = true
+		}
+		// For workers, get the MachineDeployment pool name
+		if !isControlPlane {
+			if deploymentName, exists := contaboMachine.Labels["cluster.x-k8s.io/deployment-name"]; exists {
+				poolName = deploymentName
+			}
+		}
+	}
+
+	// List all ContaboMachines in the same namespace with the same cluster label
+	var machineList infrastructurev1beta2.ContaboMachineList
+	if err := r.List(ctx, &machineList, client.MatchingLabels{
+		"cluster.x-k8s.io/cluster-name": clusterName,
+	}); err != nil {
+		return fmt.Errorf("failed to list ContaboMachines: %w", err)
+	}
+
+	// Build a set of used indexes for machines with the same role, pool, and product ID
+	usedIndexes := make(map[int32]bool)
+	for _, machine := range machineList.Items {
+		// Skip the current machine
+		if machine.UID == contaboMachine.UID {
+			continue
+		}
+
+		// Check if this machine has the same role (control-plane vs worker)
+		machineIsControlPlane := false
+		machinePoolName := ""
+		if machine.Labels != nil {
+			if _, exists := machine.Labels["cluster.x-k8s.io/control-plane"]; exists {
+				machineIsControlPlane = true
+			}
+			// For workers, get the MachineDeployment pool name
+			if !machineIsControlPlane {
+				if deploymentName, exists := machine.Labels["cluster.x-k8s.io/deployment-name"]; exists {
+					machinePoolName = deploymentName
+				}
+			}
+		}
+
+		// Skip if different role
+		if machineIsControlPlane != isControlPlane {
+			continue
+		}
+
+		// For workers, skip if different pool
+		if !isControlPlane && machinePoolName != poolName {
+			continue
+		}
+
+		// Track used indexes for machines with same role, pool, and product ID
+		if machine.Spec.Index != nil {
+			usedIndexes[*machine.Spec.Index] = true
+		}
+	}
+
+	// Find the next available index starting from 0
+	var nextIndex int32
+	for usedIndexes[nextIndex] {
+
+		nextIndex++
+	}
+
+	// Assign the index
+	contaboMachine.Spec.Index = &nextIndex
+	return nil
 }
