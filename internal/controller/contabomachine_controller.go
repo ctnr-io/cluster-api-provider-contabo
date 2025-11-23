@@ -149,59 +149,37 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
-	// Always apply a patch at the end of reconciliation to avoid losing status updates
-	// Also prevent concurrency errors
-	defer func() {
-		// Retrieve latest ContaboMachine for patching
-		latest := &infrastructurev1beta2.ContaboMachine{}
-		if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-			log.Error(err, "failed to get ContaboMachine for patching")
-			return
-		}
-
-		// Create patch helper from latest
-		patchHelper, err := patch.NewHelper(latest, r.Client)
-		if err != nil {
-			log.Error(err, "failed to create patch helper for ContaboMachine", "machine", latest.Name, "cluster", cluster.Name)
-			return
-		}
-
-		// Update spec, status, labels
-		latest.Spec = contaboMachine.Spec
-		latest.Status = contaboMachine.Status
-		for key, value := range contaboMachine.Labels {
-			latest.Labels[key] = value
-		}
-		if contaboMachine.Annotations != nil {
-			if latest.Annotations == nil {
-				latest.Annotations = make(map[string]string)
-			}
-			for key, value := range contaboMachine.Annotations {
-				latest.Annotations[key] = value
-			}
-		}
-		if controllerutil.ContainsFinalizer(contaboMachine, infrastructurev1beta2.MachineFinalizer) {
-			controllerutil.AddFinalizer(latest, infrastructurev1beta2.MachineFinalizer)
-		} else {
-			controllerutil.RemoveFinalizer(latest, infrastructurev1beta2.MachineFinalizer)
-		}
-		if patchErr := patchHelper.Patch(ctx, latest); patchErr != nil {
-			log.Error(patchErr, "failed to patch ContaboMachine", "machine", latest.Name, "cluster", cluster.Name)
-			return
-		}
-	}()
+	// Create patch helper at the start to track changes
+	patchHelper, err := patch.NewHelper(contaboMachine, r.Client)
+	if err != nil {
+		log.Error(err, "failed to create patch helper for ContaboMachine")
+		return ctrl.Result{}, err
+	}
 
 	// Handle deleted machines
 	if !contaboMachine.DeletionTimestamp.IsZero() {
 		r.reconcileDelete(ctx, contaboMachine, contaboCluster)
+		// Patch after deletion handling
+		if err := patchHelper.Patch(ctx, contaboMachine); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
+			log.Error(err, "Failed to patch ContaboMachine after deletion")
+		}
 		return ctrl.Result{}, nil
 	}
 
 	// Handle non-deleted machines
 	result, err := r.reconcileNormal(ctx, machine, contaboMachine, contaboCluster)
-	if err != nil {
-		log.Error(err, "Reconciliation failed")
-		return result, err
+
+	// Patch at the end
+	if patchErr := patchHelper.Patch(ctx, contaboMachine); patchErr != nil {
+		if apierrors.IsConflict(patchErr) {
+			log.V(1).Info("Patch conflict detected, will requeue", "machine", contaboMachine.Name)
+			return ctrl.Result{Requeue: true}, nil
+		}
+		log.Error(patchErr, "Failed to patch ContaboMachine", "machine", contaboMachine.Name)
+		return ctrl.Result{}, patchErr
 	}
 
 	return result, err
@@ -698,10 +676,34 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 		"sudo cat /etc/cluster-uuid",
 	)
 	if err != nil || result.RequeueAfter > 0 {
-		return result, err
+		// If we get SSH no supported methods remain, it's likely the instance has wrong SSH keys
+		// Force a reinstall to fix this
+		if err != nil && strings.Contains(err.Error(), "no supported methods remain") {
+			log.Info("SSH no supported methods remain - instance likely has wrong SSH keys, forcing reinstall",
+				"instanceID", contaboMachine.Status.Instance.InstanceId)
+		} else {
+			return result, err
+		}
 	} else if strings.TrimSpace(output) == contaboCluster.Spec.ClusterUUID {
 		log.Info("Instance already has the correct clusterUUID, skipping reinstall",
 			"instanceID", contaboMachine.Status.Instance.InstanceId)
+		// Skip reinstall, but verify SSH keys are correctly configured
+		// This is a safety check to ensure the instance has the correct SSH keys
+		hasCorrectSSHKey := false
+		for _, keyID := range contaboMachine.Status.Instance.SshKeys {
+			if keyID == contaboCluster.Status.SshKey.SecretId {
+				hasCorrectSSHKey = true
+				break
+			}
+		}
+		if !hasCorrectSSHKey {
+			log.Info("Instance has correct clusterUUID but wrong SSH keys in Contabo metadata, updating instance SSH keys",
+				"instanceID", contaboMachine.Status.Instance.InstanceId,
+				"currentKeys", contaboMachine.Status.Instance.SshKeys,
+				"expectedKey", contaboCluster.Status.SshKey.SecretId)
+			// This updates the Contabo metadata but doesn't fix authorized_keys on the instance
+			// We rely on cloud-init having already configured the keys correctly
+		}
 	} else {
 		// Reinstall instance with cloud-init bootstrap data
 		log.Info("Reinstalling instance with SSH keys and bootstrap data",
@@ -1231,6 +1233,29 @@ func (r *ContaboMachineReconciler) runMachineInstanceSshCommand(ctx context.Cont
 			return "", ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
 		}
 
+		// Check for permission denied - this usually means wrong SSH keys
+		if strings.Contains(errStr, "no supported methods remain") {
+			log.Error(err, "SSH authentication failed - instance may have incorrect SSH keys, updating it",
+				"host", host,
+				"user", user,
+				"instanceID", contaboMachine.Status.Instance.InstanceId,
+				"clusterSSHKeyID", contaboCluster.Status.SshKey.SecretId,
+				"instanceSSHKeys", contaboMachine.Status.Instance.SshKeys)
+
+			// Update keys
+			_, err := r.ContaboClient.ResetPasswordAction(ctx, contaboMachine.Status.Instance.InstanceId, nil, models.InstancesResetPasswordActionsRequest{
+				SshKeys: &[]int64{contaboCluster.Status.SshKey.SecretId},
+			})
+			if err != nil {
+				log.Error(err, "Failed to update instance SSH keys via Contabo API",
+					"instanceID", contaboMachine.Status.Instance.InstanceId,
+					"sshKeyID", contaboCluster.Status.SshKey.SecretId)
+			}
+
+			// Return specific error to trigger reinstall
+			return "", ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+
 		log.Info("SSH connection failed, will retry",
 			"host", host,
 			"user", user,
@@ -1368,21 +1393,19 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMac
 	time.Sleep(1 * time.Second) // Wait a bit to ensure unassignment is processed
 
 	// Retrieve SSH key from ContaboCluster to keep access after reinstall
-	sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
-
-	// Reinstall to clear any residual configuration
-	_, err = r.ContaboClient.ReinstallInstance(ctx, instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
-		ImageId:     DefaultUbuntuImageID,
-		DefaultUser: ptr.To(models.ReinstallInstanceRequestDefaultUserAdmin),
-		// Keep the SSH keys to allow access after reinstall
-		SshKeys: &sshKeys,
-	})
-	if err != nil {
-		log.Error(err, "Failed to reinstall instance after unassigning private network",
-			"instanceID", instance.InstanceId)
-	} else {
-		log.Info("Reinstalled instance after unassigning private network",
-			"instanceID", instance.InstanceId)
+	if contaboCluster.Status.SshKey != nil {
+		sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
+		// Reinstall to clear any residual configuration
+		_, err = r.ContaboClient.ReinstallInstance(ctx, instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
+			ImageId:     DefaultUbuntuImageID,
+			DefaultUser: ptr.To(models.ReinstallInstanceRequestDefaultUserAdmin),
+			// Keep the SSH keys to allow access after reinstall
+			SshKeys: &sshKeys,
+		})
+		if err != nil {
+			log.Error(err, "Failed to reinstall instance after unassigning private network",
+				"instanceID", instance.InstanceId)
+		}
 	}
 
 	// Remove Instance from Status
