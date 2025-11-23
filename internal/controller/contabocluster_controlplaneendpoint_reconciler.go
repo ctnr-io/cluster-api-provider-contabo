@@ -42,7 +42,7 @@ func (r *ContaboClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Con
 			Status: metav1.ConditionFalse,
 			Reason: clusterv1.WaitingForControlPlaneInitializedReason,
 		})
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	// reconcile controlplane endpoint service and endpoint slices for the control plane endpoint

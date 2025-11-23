@@ -85,12 +85,12 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			"ownerReferences", contaboCluster.OwnerReferences)
 
 		// Requeue after 10 seconds to allow Cluster controller to set OwnerRef
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	if annotations.IsPaused(cluster, contaboCluster) {
 		log.Info("ContaboCluster or linked Cluster is marked as paused. Won't reconcile")
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	// Initialize the patch helper
@@ -102,13 +102,9 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Handle deleted clusters
 	if !contaboCluster.DeletionTimestamp.IsZero() {
 		result := r.reconcileDelete(ctx, contaboCluster)
-		// Patch after deletion handling
-		if err := r.patchHelper.Patch(ctx, contaboCluster); err != nil {
-			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
-			}
-			log.Error(err, "Failed to patch ContaboCluster after deletion")
-		}
+		// Patch to update status and remove finalizer
+		// Note: This may fail if finalizer was already removed, which is fine
+		_ = r.patchHelper.Patch(ctx, contaboCluster)
 		return result, nil
 	}
 
@@ -317,7 +313,7 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 	if len(contaboMachineList.Items) > 0 {
 		err := fmt.Errorf("there are still %d ContaboMachines in the cluster", len(contaboMachineList.Items))
 		log.Error(err, "There are still ContaboMachines in the cluster, requeuing deletion", "contaboMachines", len(contaboMachineList.Items))
-		return ctrl.Result{RequeueAfter: 15 * time.Second}
+		return ctrl.Result{RequeueAfter: 5 * time.Second}
 	}
 
 	// Rmeove controlplane service and endpointslices
