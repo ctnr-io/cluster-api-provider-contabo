@@ -84,7 +84,7 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			"ownerReferences", contaboCluster.OwnerReferences)
 
 		// Requeue after 10 seconds to allow Cluster controller to set OwnerRef
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	if annotations.IsPaused(cluster, contaboCluster) {
@@ -305,7 +305,7 @@ func (r *ContaboClusterReconciler) reconcileDelete(ctx context.Context, contaboC
 	if len(contaboMachineList.Items) > 0 {
 		err := fmt.Errorf("there are still %d ContaboMachines in the cluster", len(contaboMachineList.Items))
 		log.Error(err, "There are still ContaboMachines in the cluster, requeuing deletion", "contaboMachines", len(contaboMachineList.Items))
-		return ctrl.Result{RequeueAfter: 10 * time.Second}
+		return ctrl.Result{RequeueAfter: 15 * time.Second}
 	}
 
 	// Rmeove controlplane service and endpointslices

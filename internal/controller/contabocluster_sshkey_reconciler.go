@@ -119,7 +119,7 @@ func (r *ContaboClusterReconciler) reconcileKubernetesSSHKeySecret(ctx context.C
 		}
 
 		// Requeue to allow time for the secret to be created
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	return ctrl.Result{}, nil
@@ -197,7 +197,7 @@ func (r *ContaboClusterReconciler) reconcileContaboSSHKeySecret(ctx context.Cont
 		}
 		// TODO: if there is any bootstraped machine already using old ssh key and is not he same as then new, we need to reset their ssh keys
 
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	log.Info("Found existing SSH key in Contabo API", "sshKeyContaboName", sshKeyContaboName)
@@ -220,7 +220,7 @@ func (r *ContaboClusterReconciler) reconcileContaboSSHKeySecret(ctx context.Cont
 			)
 		}
 		// Requeue to allow time for the deletion to propagate
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	// Update status with SSH key info

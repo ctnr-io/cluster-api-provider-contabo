@@ -120,7 +120,7 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			"ownerReferences", contaboMachine.OwnerReferences)
 
 		// Requeue after 10 seconds to allow Machine controller to set OwnerRef
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	log = log.WithValues("machine", machine.Name)
@@ -317,7 +317,7 @@ func (r *ContaboMachineReconciler) setupContaboMachine(ctx context.Context, mach
 	// Assign a unique index to this machine within the cluster
 	if err := r.assignMachineIndex(ctx, contaboMachine, machine.Spec.ClusterName); err != nil {
 		log.Error(err, "Failed to assign machine index")
-		return ctrl.Result{RequeueAfter: 10 * time.Second}
+		return ctrl.Result{RequeueAfter: 15 * time.Second}
 	}
 
 	// Check if cluster private network is ready
@@ -367,7 +367,7 @@ func (r *ContaboMachineReconciler) getBootstrapData(ctx context.Context, machine
 			Status: metav1.ConditionFalse,
 			Reason: infrastructurev1beta2.WaitingForBootstrapDataReason,
 		})
-		return "", ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return "", ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	// Get bootstrap data
@@ -393,7 +393,7 @@ func (r *ContaboMachineReconciler) getBootstrapData(ctx context.Context, machine
 			Status: metav1.ConditionFalse,
 			Reason: infrastructurev1beta2.WaitingForBootstrapDataReason,
 		})
-		return "", ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return "", ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	cloudConfig := workerCloudConfig
@@ -538,7 +538,7 @@ func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, con
 	}
 
 	// Force requeue to retrieve instance via display name
-	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 }
 
 // reconcilePrivateNetworkAssignment handles private network assignment for the instance
@@ -691,7 +691,7 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 	)
 	if err != nil {
 		log.Info("SSH command failed, will retrying...", "error", err.Error())
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	} else if output != nil && strings.TrimSpace(*output) == contaboCluster.Spec.ClusterUUID {
 		log.Info("Instance already has the correct clusterUUID, skipping reinstall",
 			"instanceID", contaboMachine.Status.Instance.InstanceId)
@@ -759,11 +759,11 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 	)
 	if cloudInitStatus == nil && err != nil {
 		log.Info("SSH command failed, will retry", "error", err.Error(), "requeueAfter", "10s")
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 	if cloudInitStatus == nil {
 		log.Info("SSH command returned empty output, will retry", "requeueAfter", "10s")
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 	// Check if cloud-init finished successfully
 	if strings.Contains(*cloudInitStatus, "status: error") {
@@ -784,7 +784,7 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 			log.Error(err, "Failed to reset instance after cloud-init failure",
 				"instanceID", contaboMachine.Status.Instance.InstanceId)
 		}
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, err
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, err
 	}
 
 	if strings.Contains(*cloudInitStatus, "status: running") {
@@ -1224,7 +1224,7 @@ func (r *ContaboMachineReconciler) runMachineInstanceSshCommand(ctx context.Cont
 		isNetworkError := strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "timeout")
 
 		// Update ssh key of the contabo machine auth failed
-		if isAuthError {
+		if !strings.Contains(errStr, "timeout") {
 			log.Info("SSH connection method issue, update instance ssh key", "host", host, "user", user)
 			sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
 			_, err := r.ContaboClient.ResetPasswordAction(ctx, contaboMachine.Status.Instance.InstanceId, nil, models.InstancesResetPasswordActionsRequest{
@@ -1233,6 +1233,8 @@ func (r *ContaboMachineReconciler) runMachineInstanceSshCommand(ctx context.Cont
 			if err != nil {
 				return nil, fmt.Errorf("failed to update instance SSH keys after connection method issue: %v", err)
 			}
+		}
+		if isAuthError {
 			return nil, fmt.Errorf("SSH authentication failed to %s with user %s: %v", host, currentUser, err)
 		}
 		if isNetworkError {

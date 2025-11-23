@@ -51,7 +51,7 @@ func (r *ContaboClusterReconciler) reconcilePrivateNetwork(ctx context.Context, 
 		}
 
 		// Requeue to retry after private network creation
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
 	log.Info("Found existing private network in Contabo API", "privateNetworkName", privateNetworkName)

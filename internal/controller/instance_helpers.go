@@ -298,7 +298,7 @@ func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, c
 		instance := contaboMachine.Status.Instance
 		contaboMachine.Status.Instance = nil
 
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, r.handleError(
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, r.handleError(
 			ctx,
 			contaboMachine,
 			errors.New(*instance.ErrorMessage),
@@ -348,7 +348,7 @@ func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, c
 	case infrastructurev1beta2.InstanceStatusRescue:
 	case infrastructurev1beta2.InstanceStatusResetPassword:
 	case infrastructurev1beta2.InstanceStatusUninstalled:
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, r.handleError(
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, r.handleError(
 			ctx,
 			contaboMachine,
 			errors.New("instance is not ready"),
@@ -364,7 +364,7 @@ func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, c
 			Reason:  infrastructurev1beta2.InstanceCreatingReason,
 			Message: message,
 		})
-		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	case infrastructurev1beta2.InstanceStatusStopped:
 		message := fmt.Sprintf("Instance %d is stopped, starting it...", contaboMachine.Status.Instance.InstanceId)
 		log.Info(message)
@@ -377,7 +377,7 @@ func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, c
 		// Start the instance if it is stopped
 		_, err := r.ContaboClient.Start(ctx, contaboMachine.Status.Instance.InstanceId, nil)
 		if err != nil {
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, r.handleError(
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, r.handleError(
 				ctx,
 				contaboMachine,
 				err,
@@ -385,7 +385,7 @@ func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, c
 				fmt.Sprintf("Failed to start instance %d", contaboMachine.Status.Instance.InstanceId),
 			)
 		}
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	case infrastructurev1beta2.InstanceStatusRunning:
 		message := fmt.Sprintf("Instance %d is running", contaboMachine.Status.Instance.InstanceId)
 		log.Info(message)
