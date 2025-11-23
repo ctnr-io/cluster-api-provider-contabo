@@ -1224,9 +1224,9 @@ func (r *ContaboMachineReconciler) runMachineInstanceSshCommand(ctx context.Cont
 		isNetworkError := strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "timeout")
 
 		// Update ssh key of the contabo machine auth failed
-		if !strings.Contains(errStr, "timeout") {
-			log.Info("SSH connection method issue, update instance ssh key", "host", host, "user", user)
+		if isAuthError || strings.Contains(errStr, "connection refused") {
 			sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
+			log.Info("SSH connection method issue, update instance ssh key", "host", host, "user", user, "sshKeys", sshKeys)
 			_, err := r.ContaboClient.ResetPasswordAction(ctx, contaboMachine.Status.Instance.InstanceId, nil, models.InstancesResetPasswordActionsRequest{
 				SshKeys: &sshKeys,
 			})
