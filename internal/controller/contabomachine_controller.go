@@ -172,6 +172,12 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		for key, value := range contaboMachine.Labels {
 			latest.Labels[key] = value
 		}
+		for key, value := range contaboMachine.Annotations {
+			if latest.Annotations == nil {
+				latest.Annotations = make(map[string]string)
+			}
+			latest.Annotations[key] = value
+		}
 		if controllerutil.ContainsFinalizer(contaboMachine, infrastructurev1beta2.MachineFinalizer) {
 			controllerutil.AddFinalizer(latest, infrastructurev1beta2.MachineFinalizer)
 		} else {
