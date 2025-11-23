@@ -1232,7 +1232,7 @@ func (r *ContaboMachineReconciler) runMachineInstanceSshCommand(ctx context.Cont
 			// Check when we last updated SSH keys using an annotation
 			const sshKeyUpdateAnnotation = "contabo.cluster.x-k8s.io/last-ssh-key-update"
 			lastUpdate := contaboMachine.Annotations[sshKeyUpdateAnnotation]
-			
+
 			shouldUpdate := true
 			if lastUpdate != "" {
 				// Parse the timestamp
@@ -1251,25 +1251,25 @@ func (r *ContaboMachineReconciler) runMachineInstanceSshCommand(ctx context.Cont
 
 			if shouldUpdate {
 				sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
-				log.Info("SSH authentication failed, updating instance SSH key", 
-					"host", host, 
-					"user", user, 
+				log.Info("SSH authentication failed, updating instance SSH key",
+					"host", host,
+					"user", user,
 					"sshKeys", sshKeys,
 					"error", errStr)
-				
+
 				_, err := r.ContaboClient.ResetPasswordAction(ctx, contaboMachine.Status.Instance.InstanceId, nil, models.InstancesResetPasswordActionsRequest{
 					SshKeys: &sshKeys,
 				})
 				if err != nil {
 					return nil, fmt.Errorf("failed to update instance SSH keys after authentication failure: %v", err)
 				}
-				
+
 				// Mark that we just updated the SSH keys
 				if contaboMachine.Annotations == nil {
 					contaboMachine.Annotations = make(map[string]string)
 				}
 				contaboMachine.Annotations[sshKeyUpdateAnnotation] = time.Now().Format(time.RFC3339)
-				
+
 				log.Info("Updated instance SSH keys, will wait for changes to apply")
 				return nil, fmt.Errorf("SSH authentication failed, updated instance SSH keys, will retry connection")
 			}
@@ -1277,7 +1277,7 @@ func (r *ContaboMachineReconciler) runMachineInstanceSshCommand(ctx context.Cont
 			// We recently updated, just wait
 			return nil, fmt.Errorf("SSH authentication failed to %s with user %s (SSH keys recently updated, waiting for system to apply changes)", host, currentUser)
 		}
-		
+
 		return nil, fmt.Errorf("SSH connection failed to %s: %v", host, err)
 	}
 	defer func() {
