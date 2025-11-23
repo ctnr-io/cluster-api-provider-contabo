@@ -50,6 +50,19 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
+      - name: Determine build platforms
+        id: platforms
+        run: |
+          # For pre-releases, only build amd64 to speed up the process
+          # For stable releases, build both amd64 and arm64
+          if [[ "${{ steps.version.outputs.VERSION }}" =~ (alpha|beta|rc) ]]; then
+            echo "PLATFORMS=linux/amd64" >> $GITHUB_OUTPUT
+            echo "Building pre-release for linux/amd64 only"
+          else
+            echo "PLATFORMS=linux/amd64,linux/arm64" >> $GITHUB_OUTPUT
+            echo "Building stable release for linux/amd64,linux/arm64"
+          fi
+
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -68,13 +81,43 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ steps.platforms.outputs.PLATFORMS }}
           cache-from: |
             type=gha,scope=release
             type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-to: type=gha,mode=max,scope=release
           build-args: |
             BUILDKIT_INLINE_CACHE=1
+          provenance: false
+          sbom: false
+
+      - name: Prepare release artifacts in parallel
+        env:
+          IMG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
+        run: |
+          mkdir -p out
+          
+          # Run these in parallel
+          (
+            cp metadata.yaml out/metadata.yaml
+            echo "✓ Copied metadata.yaml"
+          ) &
+          
+          (
+            make release-manifests IMG=${IMG}
+            echo "✓ Generated infrastructure-components.yaml"
+          ) &
+          
+          (
+            cp config/samples/cluster-template.yaml out/cluster-template.yaml
+            cp config/samples/cluster-template-ha.yaml out/cluster-template-ha.yaml 2>/dev/null || echo "No HA template found"
+            cp config/samples/cluster-template-autoscaler.yaml out/cluster-template-autoscaler.yaml 2>/dev/null || echo "No autoscaler template found"
+            echo "✓ Copied cluster templates"
+          ) &
+          
+          # Wait for all background jobs to complete
+          wait
+          echo "All artifacts prepared"
 
       - name: Build Changelog
         id: github_release
@@ -84,23 +127,6 @@ jobs:
           failOnError: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build release artifacts
-        env:
-          IMG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
-        run: |
-          mkdir -p out
-          
-          # Copy metadata
-          cp metadata.yaml out/metadata.yaml
-          
-          # Generate infrastructure components
-          make release-manifests IMG=${IMG}
-          
-          # Copy cluster templates
-          cp config/samples/cluster-template.yaml out/cluster-template.yaml
-          cp config/samples/cluster-template-ha.yaml out/cluster-template-ha.yaml 2>/dev/null || echo "No HA template found"
-          cp config/samples/cluster-template-autoscaler.yaml out/cluster-template-autoscaler.yaml 2>/dev/null || echo "No autoscaler template found"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1

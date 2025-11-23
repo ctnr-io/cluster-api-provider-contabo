@@ -198,17 +198,33 @@ func (r *ContaboClusterReconciler) reconcileContaboSSHKeySecret(ctx context.Cont
 		// TODO: if there is any bootstraped machine already using old ssh key and is not he same as then new, we need to reset their ssh keys
 
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	} else {
+		log.Info("SSH key already exists in Contabo API, update its value in any case", "sshKeyContaboName", sshKeyContaboName)
+		// We do this because we can't check the value of the existing key in Contabo API, so we just update it to be sure it's the same as in Kubernetes
+		trimmedPublicKey := strings.TrimSpace(publicKey)
+		sshKeyUpdateResp, err := r.ContaboClient.UpdateSecretWithResponse(ctx, int64(resp.JSON200.Data[0].SecretId), nil, models.UpdateSecretRequest{
+			Name:  ptr.To(sshKeyContaboName),
+			Value: ptr.To(trimmedPublicKey),
+		})
+		if err != nil || sshKeyUpdateResp.StatusCode() < 200 || sshKeyUpdateResp.StatusCode() >= 300 {
+			return ctrl.Result{}, r.handleError(
+				ctx,
+				contaboCluster,
+				err,
+				infrastructurev1beta2.ClusterSshKeyReadyCondition,
+				infrastructurev1beta2.ClusterSshKeyFailedReason,
+				fmt.Sprintf("Failed to update SSH public key in Contabo API: %s", sshKeyContaboName),
+			)
+		}
 	}
 
 	log.Info("Found existing SSH key in Contabo API", "sshKeyContaboName", sshKeyContaboName)
 	sshKey = &resp.JSON200.Data[0]
 
-	// If kubernetes ssh key was created after this one, delete contabo one, and requeue
-	createdSSHKeyTime := sshKey.CreatedAt.UTC()
-	createdKubernetesSSHKeyTime := sshKeySecret.CreationTimestamp.UTC()
-
-	if createdKubernetesSSHKeyTime.After(createdSSHKeyTime) {
+	// Check that the SSH key in Contabo matches the one in Kubernetes if already in status
+	if contaboCluster.Status.SshKey != nil && contaboCluster.Status.SshKey.SecretId != int64(sshKey.SecretId) {
 		log.Info("Kubernetes SSH key is newer than Contabo SSH key, deleting Contabo SSH key", "sshKeyContaboName", sshKeyContaboName)
+		contaboCluster.Status.SshKey = nil
 		if _, err := r.ContaboClient.DeleteSecretWithResponse(ctx, int64(sshKey.SecretId), nil); err != nil {
 			return ctrl.Result{}, r.handleError(
 				ctx,
