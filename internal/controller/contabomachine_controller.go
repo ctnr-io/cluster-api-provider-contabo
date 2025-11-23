@@ -1220,26 +1220,64 @@ func (r *ContaboMachineReconciler) runMachineInstanceSshCommand(ctx context.Cont
 	if err != nil {
 		// Provide more specific error information for better requeue handling
 		errStr := err.Error()
-		isAuthError := strings.Contains(errStr, "handshake failed") || strings.Contains(errStr, "unable to authenticate") || strings.Contains(errStr, "no supported methods remain")
-		isNetworkError := strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "timeout")
 
-		// Update ssh key of the contabo machine auth failed
+		// Check for authentication failures - these indicate SSH key mismatch
+		isAuthError := strings.Contains(errStr, "Permission denied") ||
+			strings.Contains(errStr, "unable to authenticate") ||
+			strings.Contains(errStr, "handshake failed") ||
+			strings.Contains(errStr, "no supported methods remain")
+
+		// Only update SSH key if auth failed and we haven't recently updated
 		if isAuthError {
-			sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
-			log.Info("SSH connection method issue, update instance ssh key", "host", host, "user", user, "sshKeys", sshKeys)
-			_, err := r.ContaboClient.ResetPasswordAction(ctx, contaboMachine.Status.Instance.InstanceId, nil, models.InstancesResetPasswordActionsRequest{
-				SshKeys: &sshKeys,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("failed to update instance SSH keys after connection method issue: %v", err)
+			// Check when we last updated SSH keys using an annotation
+			const sshKeyUpdateAnnotation = "contabo.cluster.x-k8s.io/last-ssh-key-update"
+			lastUpdate := contaboMachine.Annotations[sshKeyUpdateAnnotation]
+			
+			shouldUpdate := true
+			if lastUpdate != "" {
+				// Parse the timestamp
+				if lastUpdateTime, err := time.Parse(time.RFC3339, lastUpdate); err == nil {
+					// Only update if it's been more than 5 minutes since last update
+					if time.Since(lastUpdateTime) < 5*time.Minute {
+						shouldUpdate = false
+						log.Info("SSH authentication failed but SSH keys were recently updated, waiting for changes to apply",
+							"host", host,
+							"user", user,
+							"lastUpdate", lastUpdate,
+							"timeSince", time.Since(lastUpdateTime))
+					}
+				}
 			}
+
+			if shouldUpdate {
+				sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
+				log.Info("SSH authentication failed, updating instance SSH key", 
+					"host", host, 
+					"user", user, 
+					"sshKeys", sshKeys,
+					"error", errStr)
+				
+				_, err := r.ContaboClient.ResetPasswordAction(ctx, contaboMachine.Status.Instance.InstanceId, nil, models.InstancesResetPasswordActionsRequest{
+					SshKeys: &sshKeys,
+				})
+				if err != nil {
+					return nil, fmt.Errorf("failed to update instance SSH keys after authentication failure: %v", err)
+				}
+				
+				// Mark that we just updated the SSH keys
+				if contaboMachine.Annotations == nil {
+					contaboMachine.Annotations = make(map[string]string)
+				}
+				contaboMachine.Annotations[sshKeyUpdateAnnotation] = time.Now().Format(time.RFC3339)
+				
+				log.Info("Updated instance SSH keys, will wait for changes to apply")
+				return nil, fmt.Errorf("SSH authentication failed, updated instance SSH keys, will retry connection")
+			}
+
+			// We recently updated, just wait
+			return nil, fmt.Errorf("SSH authentication failed to %s with user %s (SSH keys recently updated, waiting for system to apply changes)", host, currentUser)
 		}
-		if isAuthError {
-			return nil, fmt.Errorf("SSH authentication failed to %s with user %s: %v", host, currentUser, err)
-		}
-		if isNetworkError {
-			return nil, fmt.Errorf("SSH network connection failed to %s (instance may not be ready): %v", host, err)
-		}
+		
 		return nil, fmt.Errorf("SSH connection failed to %s: %v", host, err)
 	}
 	defer func() {
