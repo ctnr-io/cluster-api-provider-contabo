@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -98,22 +99,33 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	// Always attempt to Patch the ContaboCluster object and status after each reconciliation
-	defer func() {
-		if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
-			log.Error(err, "failed to patch ContaboCluster")
-		}
-		// Wait to be sure patch is applied
-		time.Sleep(1 * time.Second)
-	}()
-
 	// Handle deleted clusters
 	if !contaboCluster.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, contaboCluster), nil
+		result := r.reconcileDelete(ctx, contaboCluster)
+		// Patch after deletion handling
+		if err := r.patchHelper.Patch(ctx, contaboCluster); err != nil {
+			if apierrors.IsConflict(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
+			log.Error(err, "Failed to patch ContaboCluster after deletion")
+		}
+		return result, nil
 	}
 
 	// Handle non-deleted clusters
-	return r.reconcileApply(ctx, contaboCluster)
+	result, err := r.reconcileApply(ctx, contaboCluster)
+
+	// Patch at the end
+	if patchErr := r.patchHelper.Patch(ctx, contaboCluster); patchErr != nil {
+		if apierrors.IsConflict(patchErr) {
+			log.V(1).Info("Patch conflict detected, will requeue", "cluster", contaboCluster.Name)
+			return ctrl.Result{Requeue: true}, nil
+		}
+		log.Error(patchErr, "Failed to patch ContaboCluster", "cluster", contaboCluster.Name)
+		return ctrl.Result{}, patchErr
+	}
+
+	return result, err
 }
 
 func (r *ContaboClusterReconciler) reconcileApply(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {

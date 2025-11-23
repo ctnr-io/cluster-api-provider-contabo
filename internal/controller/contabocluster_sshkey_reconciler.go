@@ -155,6 +155,23 @@ func (r *ContaboClusterReconciler) reconcileContaboSSHKeySecret(ctx context.Cont
 
 	publicKey := string(sshKeySecret.Data["id_rsa.pub"])
 
+	// Check if SSH key status is already set and valid
+	if contaboCluster.Status.SshKey != nil {
+		// Verify the SSH key still exists in Contabo API
+		sshKeyRetrieveResp, err := r.ContaboClient.RetrieveSecretWithResponse(ctx, contaboCluster.Status.SshKey.SecretId, &models.RetrieveSecretParams{})
+		if err == nil && sshKeyRetrieveResp.StatusCode() >= 200 && sshKeyRetrieveResp.StatusCode() < 300 {
+			// SSH key exists and status is correct, nothing to do
+			log.V(1).Info("SSH key already configured correctly in status", 
+				"sshKeyID", contaboCluster.Status.SshKey.SecretId,
+				"sshKeyName", contaboCluster.Status.SshKey.Name)
+			return ctrl.Result{}, nil
+		}
+		// SSH key in status doesn't exist anymore, clear it and continue to create/find new one
+		log.Info("SSH key in status no longer exists in Contabo API, will find or create new one",
+			"oldSSHKeyID", contaboCluster.Status.SshKey.SecretId)
+		contaboCluster.Status.SshKey = nil
+	}
+
 	// Check if SSH key with the same name already exists in Contabo API
 	resp, err := r.ContaboClient.RetrieveSecretListWithResponse(ctx, &models.RetrieveSecretListParams{
 		Name: &sshKeyContaboName,
@@ -195,58 +212,25 @@ func (r *ContaboClusterReconciler) reconcileContaboSSHKeySecret(ctx context.Cont
 				"Failed to retrieve created SSH key from Contabo API",
 			)
 		}
-		// TODO: if there is any bootstraped machine already using old ssh key and is not he same as then new, we need to reset their ssh keys
-
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		
+		sshKey = &sshKeyRetrieveResp.JSON200.Data[0]
+		log.Info("Created new SSH key in Contabo API", "sshKeyID", sshKey.SecretId, "sshKeyName", sshKey.Name)
 	} else {
-		log.Info("SSH key already exists in Contabo API, update its value in any case", "sshKeyContaboName", sshKeyContaboName)
-		// We do this because we can't check the value of the existing key in Contabo API, so we just update it to be sure it's the same as in Kubernetes
-		trimmedPublicKey := strings.TrimSpace(publicKey)
-		sshKeyUpdateResp, err := r.ContaboClient.UpdateSecretWithResponse(ctx, int64(resp.JSON200.Data[0].SecretId), nil, models.UpdateSecretRequest{
-			Name:  ptr.To(sshKeyContaboName),
-			Value: ptr.To(trimmedPublicKey),
-		})
-		if err != nil || sshKeyUpdateResp.StatusCode() < 200 || sshKeyUpdateResp.StatusCode() >= 300 {
-			return ctrl.Result{}, r.handleError(
-				ctx,
-				contaboCluster,
-				err,
-				infrastructurev1beta2.ClusterSshKeyReadyCondition,
-				infrastructurev1beta2.ClusterSshKeyFailedReason,
-				fmt.Sprintf("Failed to update SSH public key in Contabo API: %s", sshKeyContaboName),
-			)
+		log.Info("SSH key already exists in Contabo API", "sshKeyContaboName", sshKeyContaboName, "sshKeyID", resp.JSON200.Data[0].SecretId)
+		sshKey = &resp.JSON200.Data[0]
+	}
+
+	// Update status with SSH key info (only if not already set or different)
+	if contaboCluster.Status.SshKey == nil || contaboCluster.Status.SshKey.SecretId != int64(sshKey.SecretId) {
+		contaboCluster.Status.SshKey = &infrastructurev1beta2.ContaboSshKeyStatus{
+			Name:     sshKey.Name,
+			SecretId: int64(sshKey.SecretId),
+			Value:    sshKey.Value,
 		}
+		log.Info("Updated SSH key status", "sshKeyName", sshKey.Name, "sshKeyID", sshKey.SecretId)
 	}
 
-	log.Info("Found existing SSH key in Contabo API", "sshKeyContaboName", sshKeyContaboName)
-	sshKey = &resp.JSON200.Data[0]
-
-	// Check that the SSH key in Contabo matches the one in Kubernetes if already in status
-	if contaboCluster.Status.SshKey != nil && contaboCluster.Status.SshKey.SecretId != int64(sshKey.SecretId) {
-		log.Info("Kubernetes SSH key is newer than Contabo SSH key, deleting Contabo SSH key", "sshKeyContaboName", sshKeyContaboName)
-		contaboCluster.Status.SshKey = nil
-		if _, err := r.ContaboClient.DeleteSecretWithResponse(ctx, int64(sshKey.SecretId), nil); err != nil {
-			return ctrl.Result{}, r.handleError(
-				ctx,
-				contaboCluster,
-				err,
-				infrastructurev1beta2.ClusterSshKeyReadyCondition,
-				infrastructurev1beta2.ClusterSshKeyFailedReason,
-				"Failed to delete old SSH key from Contabo API",
-			)
-		}
-		// Requeue to allow time for the deletion to propagate
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-	}
-
-	// Update status with SSH key info
-	contaboCluster.Status.SshKey = &infrastructurev1beta2.ContaboSshKeyStatus{
-		Name:     sshKey.Name,
-		SecretId: int64(sshKey.SecretId),
-		Value:    sshKey.Value,
-	}
-
-	log.Info("SSH key reconciled", "sshKeyContaboName", sshKey.Name, "sshKeyId", sshKey.SecretId)
+	log.Info("SSH key reconciled successfully", "sshKeyContaboName", sshKey.Name, "sshKeyId", sshKey.SecretId)
 
 	return ctrl.Result{}, nil
 }
