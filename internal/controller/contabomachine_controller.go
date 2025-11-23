@@ -159,13 +159,9 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Handle deleted machines
 	if !contaboMachine.DeletionTimestamp.IsZero() {
 		r.reconcileDelete(ctx, contaboMachine, contaboCluster)
-		// Patch after deletion handling
-		if err := patchHelper.Patch(ctx, contaboMachine); err != nil {
-			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
-			}
-			log.Error(err, "Failed to patch ContaboMachine after deletion")
-		}
+		// Patch to update status and remove finalizer
+		// Note: This may fail if finalizer was already removed, which is fine
+		_ = patchHelper.Patch(ctx, contaboMachine)
 		return ctrl.Result{}, nil
 	}
 
