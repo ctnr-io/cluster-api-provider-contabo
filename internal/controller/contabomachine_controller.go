@@ -1232,18 +1232,26 @@ func (r *ContaboMachineReconciler) runMachineInstanceSshCommand(ctx context.Cont
 		}
 
 		// Only update SSH key if auth failed and we haven't recently updated
-		if strings.Contains(errStr, "handshake failed") || strings.Contains(errStr, "no supported methods remain") {
-			log.Info("SSH authentication failed - invalid key, reset instance",
+		if strings.Contains(errStr, "handshake failed") {
+			log.Info("SSH handshake failed - possible invalid key, update SSH keys on instance",
 				"host", host,
 				"user", user,
 				"error", errStr)
 
 			// Check when we last updated SSH keys using an annotation
 			sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
-			log.Info("SSH authentication failed, reset instance with ssh keys",
+			_, err := r.ContaboClient.ResetPasswordAction(ctx, contaboMachine.Status.Instance.InstanceId, nil, models.InstancesResetPasswordActionsRequest{
+				SshKeys:  &sshKeys,
+			})
+			if err != nil {
+				return "", ctrl.Result{}, fmt.Errorf("failed to update instance SSH keys after handshake failure: %v", err)
+			}
+			return "", ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+
+		if strings.Contains(errStr, "no supported methods remain") {
+			log.Info("SSH authentication failed - invalid key, reset instance",
 				"host", host,
-				"user", user,
-				"sshKeys", sshKeys,
 				"error", errStr)
 
 			err := r.resetInstance(ctx, contaboMachine, contaboCluster, contaboMachine.Status.Instance, nil)
