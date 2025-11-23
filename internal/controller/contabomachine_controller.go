@@ -1220,10 +1220,44 @@ func (r *ContaboMachineReconciler) runMachineInstanceSshCommand(ctx context.Cont
 
 	sshClient, err = ssh.Dial("tcp", net.JoinHostPort(host, "22"), config)
 	if err != nil {
+		// Provide more specific error information for better requeue handling
+		errStr := err.Error()
+
+		// Check for connection reset - this means SSH service is restarting or overloaded
+		if strings.Contains(errStr, "connection reset") || strings.Contains(errStr, "Connection reset") {
+			log.Info("SSH connection reset by peer - SSH service may be restarting, will retry",
+				"host", host,
+				"user", user)
+			return "", ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
+		}
+
+		// Only update SSH key if auth failed and we haven't recently updated
+		if strings.Contains(errStr, "no supported methods remain") {
+			log.Info("SSH authentication failed - invalid key, reset instance",
+				"host", host,
+				"user", user,
+				"error", errStr)
+
+			// Check when we last updated SSH keys using an annotation
+			sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
+			log.Info("SSH authentication failed, reset instance with ssh keys",
+				"host", host,
+				"user", user,
+				"sshKeys", sshKeys,
+				"error", errStr)
+
+			err := r.resetInstance(ctx, contaboMachine, contaboCluster, contaboMachine.Status.Instance, nil)
+			if err != nil {
+				return "", ctrl.Result{}, fmt.Errorf("failed to update instance SSH keys after authentication failure: %v", err)
+			}
+
+			return "", ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+
 		log.Info("SSH connection failed, will retry",
 			"host", host,
 			"user", user,
-			"error", err.Error(),
+			"error", errStr,
 		)
 		return "", ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
