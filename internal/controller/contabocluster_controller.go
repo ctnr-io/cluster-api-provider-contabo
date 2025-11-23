@@ -102,13 +102,9 @@ func (r *ContaboClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Handle deleted clusters
 	if !contaboCluster.DeletionTimestamp.IsZero() {
 		result := r.reconcileDelete(ctx, contaboCluster)
-		// Patch after deletion handling
-		if err := r.patchHelper.Patch(ctx, contaboCluster); err != nil {
-			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
-			}
-			log.Error(err, "Failed to patch ContaboCluster after deletion")
-		}
+		// Patch to update status and remove finalizer
+		// Note: This may fail if finalizer was already removed, which is fine
+		_ = r.patchHelper.Patch(ctx, contaboCluster)
 		return result, nil
 	}
 

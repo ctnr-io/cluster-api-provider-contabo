@@ -159,13 +159,9 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Handle deleted machines
 	if !contaboMachine.DeletionTimestamp.IsZero() {
 		r.reconcileDelete(ctx, contaboMachine, contaboCluster)
-		// Patch after deletion handling
-		if err := patchHelper.Patch(ctx, contaboMachine); err != nil {
-			if apierrors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
-			}
-			log.Error(err, "Failed to patch ContaboMachine after deletion")
-		}
+		// Patch to update status and remove finalizer
+		// Note: This may fail if finalizer was already removed, which is fine
+		_ = patchHelper.Patch(ctx, contaboMachine)
 		return ctrl.Result{}, nil
 	}
 
@@ -954,28 +950,19 @@ func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, contaboM
 		return
 	}
 
+	instance := contaboMachine.Status.Instance
+
 	// First, stop the instance
-	_, err := r.ContaboClient.Stop(ctx, contaboMachine.Status.Instance.InstanceId, nil)
+	_, err := r.ContaboClient.Stop(ctx, instance.InstanceId, nil)
 	if err != nil {
 		log.Error(err, "Failed to stop instance during deletion",
-			"instanceID", contaboMachine.Status.Instance.InstanceId)
+			"instanceID", instance.InstanceId)
 	}
 
 	// Reset the instance by removing it from any private networks
-	if err := r.resetInstance(ctx, contaboMachine, contaboCluster, contaboMachine.Status.Instance, nil); err != nil {
+	if err := r.resetInstance(ctx, contaboMachine, contaboCluster, instance, nil); err != nil {
 		log.Error(err, "Failed to reset instance during deletion",
-			"instanceID", contaboMachine.Status.Instance.InstanceId)
-	}
-
-	// Update instance display name to mark it as reusable
-	displayName := ""
-	_, err = r.ContaboClient.PatchInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, nil, models.PatchInstanceRequest{
-		DisplayName: &displayName,
-	})
-	if err != nil {
-		log.Error(err, "Failed to update instance display name during deletion",
-			"instanceID", contaboMachine.Status.Instance.InstanceId,
-			"newDisplayName", displayName)
+			"instanceID", instance.InstanceId)
 	}
 
 	// Remove finalizer
