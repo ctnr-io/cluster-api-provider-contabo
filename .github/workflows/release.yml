@@ -31,6 +31,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -61,14 +62,28 @@ jobs:
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
+        id: docker_build
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
-          cache-from: type=gha,scope=release
+          cache-from: |
+            type=gha,scope=release
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-to: type=gha,mode=max,scope=release
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+
+      - name: Build Changelog
+        id: github_release
+        uses: mikepenz/release-changelog-builder-action@v4
+        with:
+          configuration: ".github/changelog-config.json"
+          failOnError: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build release artifacts
         env:
@@ -86,15 +101,6 @@ jobs:
           cp config/samples/cluster-template.yaml out/cluster-template.yaml
           cp config/samples/cluster-template-ha.yaml out/cluster-template-ha.yaml 2>/dev/null || echo "No HA template found"
           cp config/samples/cluster-template-autoscaler.yaml out/cluster-template-autoscaler.yaml 2>/dev/null || echo "No autoscaler template found"
-
-      - name: Build Changelog
-        id: github_release
-        uses: mikepenz/release-changelog-builder-action@v4
-        with:
-          configuration: ".github/changelog-config.json"
-          failOnError: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
