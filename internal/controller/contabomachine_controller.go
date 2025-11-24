@@ -235,8 +235,8 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 	}
 
 	// Setup the resource
-	if result := r.setupContaboMachine(ctx, machine, contaboMachine, contaboCluster); result.RequeueAfter > 0 {
-		return result, nil
+	if result, err := r.setupContaboMachine(ctx, machine, contaboMachine, contaboCluster); err != nil || result.RequeueAfter > 0 {
+		return result, err
 	}
 
 	contaboMachine.Status.Initialization = &infrastructurev1beta2.ContaboMachineInitializationStatus{
@@ -249,7 +249,7 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
 		Type:   infrastructurev1beta2.InstanceReadyCondition,
 		Status: metav1.ConditionFalse,
-		Reason: "",
+		Reason: infrastructurev1beta2.InstanceProvisioningReason,
 	})
 
 	// Provision the instance for CAPI
@@ -312,7 +312,7 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 }
 
 // setupContaboMachine handles initial machine setup and validation
-func (r *ContaboMachineReconciler) setupContaboMachine(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) ctrl.Result {
+func (r *ContaboMachineReconciler) setupContaboMachine(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	if contaboMachine.Status.Instance == nil {
@@ -339,7 +339,7 @@ func (r *ContaboMachineReconciler) setupContaboMachine(ctx context.Context, mach
 	// Assign a unique index to this machine within the cluster
 	if err := r.assignMachineIndex(ctx, contaboMachine, machine.Spec.ClusterName); err != nil {
 		log.Error(err, "Failed to assign machine index")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	// Check if cluster private network is ready
@@ -350,7 +350,7 @@ func (r *ContaboMachineReconciler) setupContaboMachine(ctx context.Context, mach
 			Status: metav1.ConditionFalse,
 			Reason: infrastructurev1beta2.InstanceWaitingForPrivateNetworksReason,
 		})
-		return ctrl.Result{RequeueAfter: 15 * time.Second}
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
 		Type:   infrastructurev1beta2.ClusterPrivateNetworkReadyCondition,
@@ -366,7 +366,7 @@ func (r *ContaboMachineReconciler) setupContaboMachine(ctx context.Context, mach
 			Status: metav1.ConditionFalse,
 			Reason: infrastructurev1beta2.InstanceWaitingForSshKeyReason,
 		})
-		return ctrl.Result{RequeueAfter: 15 * time.Second}
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
 		Type:   infrastructurev1beta2.ClusterSshKeyReadyCondition,
@@ -374,7 +374,7 @@ func (r *ContaboMachineReconciler) setupContaboMachine(ctx context.Context, mach
 		Reason: infrastructurev1beta2.ClusterSshKeyReadyReason,
 	})
 
-	return ctrl.Result{}
+	return ctrl.Result{}, nil
 }
 
 // getBootstrapData retrieves and validates bootstrap data
@@ -523,11 +523,12 @@ func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, con
 	if contaboMachine.Status.Instance == nil {
 		instance, err = r.findReusableInstance(ctx, contaboMachine, contaboCluster)
 		if err != nil {
-			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+			return ctrl.Result{}, err
 		}
 		if instance != nil {
 			contaboMachine.Status.Instance = instance
 			log.Info("Found reusable instance", "instanceID", instance.InstanceId)
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
 	}
 
@@ -545,6 +546,7 @@ func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, con
 		if instance != nil {
 			contaboMachine.Status.Instance = instance
 			log.Info("Created new instance", "instanceID", instance.InstanceId)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 	}
 

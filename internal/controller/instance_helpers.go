@@ -149,6 +149,13 @@ func (r *ContaboMachineReconciler) findReusableInstance(
 
 				convertedInstance := convertListInstanceResponseData(instance)
 
+				// Reset the instance by removing any private network assignments
+				if err := r.resetInstance(ctx, contaboMachine, convertedInstance, nil); err != nil {
+					log.Error(err, "Failed to reset instance",
+						"instanceID", convertedInstance.InstanceId)
+					continue
+				}
+
 				// CRITICAL: Update display name IMMEDIATELY to claim this instance
 				// This must happen BEFORE releasing the mutex to prevent race conditions
 				displayName := FormatDisplayName(contaboMachine, contaboCluster)
@@ -158,24 +165,24 @@ func (r *ContaboMachineReconciler) findReusableInstance(
 					"newDisplayName", displayName,
 					"forMachine", contaboMachine.Name)
 
-				_, err := r.ContaboClient.PatchInstanceWithResponse(ctx, convertedInstance.InstanceId, nil, models.PatchInstanceRequest{
+				patchResp, err := r.ContaboClient.PatchInstanceWithResponse(ctx, convertedInstance.InstanceId, nil, models.PatchInstanceRequest{
 					DisplayName: &displayName,
 				})
 				if err != nil {
-					log.Error(err, "Failed to update instance display name to claim it",
+					log.Error(err, "Failed to update instance display name to claim it (network error)",
 						"instanceID", convertedInstance.InstanceId)
 					continue
 				}
+				if patchResp.StatusCode() < 200 || patchResp.StatusCode() >= 300 {
+					return nil, fmt.Errorf("failed to update instance display name to claim it, status code: %d", patchResp.StatusCode())
+				}
+
+				log.Info("Successfully updated display name on Contabo API",
+					"instanceID", convertedInstance.InstanceId,
+					"statusCode", patchResp.StatusCode())
 
 				// Update the converted instance with the new display name
 				convertedInstance.DisplayName = displayName
-
-				// Reset the instance by removing any private network assignments
-				if err := r.resetInstance(ctx, contaboMachine, convertedInstance, nil); err != nil {
-					log.Error(err, "Failed to reset instance",
-						"instanceID", convertedInstance.InstanceId)
-					continue
-				}
 
 				log.Info("Successfully claimed and reset reusable instance",
 					"instanceID", convertedInstance.InstanceId,
