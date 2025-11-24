@@ -469,7 +469,7 @@ func (r *ContaboMachineReconciler) provisionInstance(ctx context.Context, contab
 	}
 
 	// Validate instance status
-	if result, err := r.validateInstanceStatus(ctx, contaboMachine, contaboCluster); err != nil || result.RequeueAfter > 0 {
+	if result, err := r.validateInstanceStatus(ctx, contaboMachine); err != nil || result.RequeueAfter > 0 {
 		return result, err
 	}
 
@@ -479,7 +479,7 @@ func (r *ContaboMachineReconciler) provisionInstance(ctx context.Context, contab
 	}
 
 	// Validate instance status again after private network assignment
-	if result, err := r.validateInstanceStatus(ctx, contaboMachine, contaboCluster); err != nil || result.RequeueAfter > 0 {
+	if result, err := r.validateInstanceStatus(ctx, contaboMachine); err != nil || result.RequeueAfter > 0 {
 		return result, err
 	}
 
@@ -674,7 +674,7 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 	log := logf.FromContext(ctx)
 
 	// Validate instance status before bootstrapping
-	result, err := r.validateInstanceStatus(ctx, contaboMachine, contaboCluster)
+	result, err := r.validateInstanceStatus(ctx, contaboMachine)
 	if err != nil || result.RequeueAfter > 0 {
 		return result, err
 	}
@@ -704,28 +704,11 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 		contaboCluster,
 		"sudo cat /etc/cluster-uuid",
 	)
-	if (err != nil && !strings.Contains(err.Error(), "no supported methods remain")) || result.RequeueAfter > 0 {
+	if err != nil || result.RequeueAfter > 0 {
 		return result, err
 	} else if strings.TrimSpace(output) == contaboCluster.Spec.ClusterUUID {
 		log.Info("Instance already has the correct clusterUUID, skipping reinstall",
 			"instanceID", contaboMachine.Status.Instance.InstanceId)
-		// Skip reinstall, but verify SSH keys are correctly configured
-		// This is a safety check to ensure the instance has the correct SSH keys
-		hasCorrectSSHKey := false
-		for _, keyID := range contaboMachine.Status.Instance.SshKeys {
-			if keyID == contaboCluster.Status.SshKey.SecretId {
-				hasCorrectSSHKey = true
-				break
-			}
-		}
-		if !hasCorrectSSHKey {
-			log.Info("Instance has correct clusterUUID but wrong SSH keys in Contabo metadata, updating instance SSH keys",
-				"instanceID", contaboMachine.Status.Instance.InstanceId,
-				"currentKeys", contaboMachine.Status.Instance.SshKeys,
-				"expectedKey", contaboCluster.Status.SshKey.SecretId)
-			// This updates the Contabo metadata but doesn't fix authorized_keys on the instance
-			// We rely on cloud-init having already configured the keys correctly
-		}
 	} else {
 		// Reinstall instance with cloud-init bootstrap data
 		log.Info("Reinstalling instance with SSH keys and bootstrap data",
@@ -765,7 +748,7 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 		}
 
 		// Validate instance status after reinstall
-		result, err = r.validateInstanceStatus(ctx, contaboMachine, contaboCluster)
+		result, err = r.validateInstanceStatus(ctx, contaboMachine)
 		if err != nil || result.RequeueAfter > 0 {
 			return result, err
 		}
@@ -1235,6 +1218,28 @@ func (r *ContaboMachineReconciler) runMachineInstanceSshCommand(ctx context.Cont
 
 	sshClient, err = ssh.Dial("tcp", net.JoinHostPort(host, "22"), config)
 	if err != nil {
+		// Check for no supported methods remain - this usually means wrong SSH keys
+		if strings.Contains(err.Error(), "no supported methods remain") {
+			log.Error(err, "SSH authentication failed - instance may have incorrect SSH keys, updating it",
+				"host", host,
+				"user", user,
+				"instanceID", contaboMachine.Status.Instance.InstanceId,
+				"clusterSSHKeyID", contaboCluster.Status.SshKey.SecretId,
+				"instanceSSHKeys", contaboMachine.Status.Instance.SshKeys)
+
+			// Update keys
+			_, err := r.ContaboClient.ResetPasswordAction(ctx, contaboMachine.Status.Instance.InstanceId, nil, models.InstancesResetPasswordActionsRequest{
+				SshKeys: &[]int64{contaboCluster.Status.SshKey.SecretId},
+			})
+			if err != nil {
+				log.Error(err, "Failed to update instance SSH keys via Contabo API",
+					"instanceID", contaboMachine.Status.Instance.InstanceId,
+					"sshKeyID", contaboCluster.Status.SshKey.SecretId)
+			}
+
+			// Return specific error to trigger reinstall
+			return "", ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		}
 		// Provide more specific error information for better requeue handling
 		log.Info("SSH connection failed, will retry",
 			"host", host,
