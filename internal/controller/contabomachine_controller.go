@@ -1294,7 +1294,6 @@ func (r *ContaboMachineReconciler) handleError(ctx context.Context, contaboMachi
 	return fmt.Errorf("%s: %w", message, err)
 }
 
-// getKubeconfig retrieves the kubeconfig from the owner Cluster's secret
 // resetInstance prepares an instance for reuse by removing it from any private networks
 func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, instance *infrastructurev1beta2.ContaboInstanceStatus, errorMessage *string) error {
 	log := logf.FromContext(ctx)
@@ -1304,9 +1303,6 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMac
 
 	// Remove ProviderID
 	contaboMachine.Spec.ProviderID = nil
-
-	// Remove Index
-	contaboMachine.Spec.Index = nil
 
 	hasErrorMessage := errorMessage != nil || (instance != nil && instance.ErrorMessage != nil)
 

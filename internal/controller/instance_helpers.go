@@ -238,6 +238,7 @@ func (r *ContaboMachineReconciler) updateInstanceState(
 	instance *infrastructurev1beta2.ContaboInstanceStatus,
 ) error {
 	log := logf.FromContext(ctx)
+
 	displayName := FormatDisplayName(contaboMachine, contaboCluster)
 
 	// Update display name if needed
