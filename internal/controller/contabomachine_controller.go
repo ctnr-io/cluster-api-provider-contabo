@@ -220,6 +220,20 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 		return ctrl.Result{}, nil
 	}
 
+	// Check if machine is already fully ready - stop reconciliation to prevent infinite loops
+	if contaboMachine.Status.Ready &&
+		contaboMachine.Status.Available &&
+		contaboMachine.Spec.ProviderID != nil &&
+		contaboMachine.Status.Initialization != nil &&
+		contaboMachine.Status.Initialization.Provisioned &&
+		contaboMachine.Status.Instance != nil &&
+		len(contaboMachine.Status.Addresses) > 0 &&
+		meta.IsStatusConditionTrue(contaboMachine.Status.Conditions, infrastructurev1beta2.InstanceReadyCondition) &&
+		meta.IsStatusConditionTrue(contaboMachine.Status.Conditions, infrastructurev1beta2.InstanceBootstrapCondition) {
+		log.V(1).Info("Machine is already fully ready, skipping reconciliation")
+		return ctrl.Result{}, nil
+	}
+
 	// Setup the resource
 	if result := r.setupContaboMachine(ctx, machine, contaboMachine, contaboCluster); result.RequeueAfter > 0 {
 		return result, nil
