@@ -549,6 +549,7 @@ func (r *ContaboMachineReconciler) findOrCreateInstance(ctx context.Context, con
 	}
 
 	// Update instance state (display name and networking)
+	// This happens inside the mutex to prevent race conditions
 	if err := r.updateInstanceState(ctx, contaboMachine, contaboCluster, contaboMachine.Status.Instance); err != nil {
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, r.handleError(
 			ctx,

@@ -31,6 +31,7 @@ import (
 	"go.yaml.in/yaml/v2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -250,6 +251,8 @@ func FormatPrivateNetworkName(contaboCluster *infrastructurev1beta2.ContaboClust
 // - Instance spec (ProductID)
 // This ensures control-plane-0, control-plane-1, worker-pool-a-0, worker-pool-a-1, etc.
 func (r *ContaboMachineReconciler) assignMachineIndex(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, clusterName string) error {
+	log := logf.FromContext(ctx)
+	
 	// Lock to prevent concurrent index assignment
 	r.indexAssignmentMutex.Lock()
 	defer r.indexAssignmentMutex.Unlock()
@@ -324,11 +327,29 @@ func (r *ContaboMachineReconciler) assignMachineIndex(ctx context.Context, conta
 	// Find the next available index starting from 0
 	var nextIndex int32
 	for usedIndexes[nextIndex] {
-
 		nextIndex++
 	}
 
 	// Assign the index
 	contaboMachine.Spec.Index = &nextIndex
+	
+	// CRITICAL: Patch immediately to persist the index while holding the lock
+	// This prevents race conditions where multiple machines get assigned the same index
+	log.Info("Assigned index to machine, persisting immediately",
+		"machine", contaboMachine.Name,
+		"index", nextIndex,
+		"role", map[bool]string{true: "control-plane", false: "worker"}[isControlPlane],
+		"pool", poolName)
+	
+	if err := r.Update(ctx, contaboMachine); err != nil {
+		// Reset the index if update fails
+		contaboMachine.Spec.Index = nil
+		return fmt.Errorf("failed to persist assigned index: %w", err)
+	}
+	
+	log.Info("Successfully assigned and persisted index",
+		"machine", contaboMachine.Name,
+		"index", nextIndex)
+	
 	return nil
 }

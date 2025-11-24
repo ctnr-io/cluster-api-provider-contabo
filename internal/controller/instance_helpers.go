@@ -86,6 +86,7 @@ func (r *ContaboMachineReconciler) findReusableInstance(
 	size := int64(100)
 
 	// Get map of instance names already in use by other ContaboMachines
+	// This prevents multiple machines from claiming the same user-specified instance
 	usedInstanceNames, err := r.getUsedInstanceNames(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get used instance names: %w", err)
@@ -136,14 +137,38 @@ func (r *ContaboMachineReconciler) findReusableInstance(
 				}
 
 				// Check that no other ContaboMachine is using this instance name
+				// This is critical when users specify Spec.Instance.Name to force a specific instance
 				if usedInstanceNames[instance.Name] != nil && usedInstanceNames[instance.Name].UID != contaboMachine.UID {
 					log.V(1).Info("Skipping instance with name already in use by another ContaboMachine",
 						"instanceID", instance.InstanceId,
-						"instanceName", instance.Name)
+						"instanceName", instance.Name,
+						"usedByMachine", usedInstanceNames[instance.Name].Name,
+						"usedByMachineUID", usedInstanceNames[instance.Name].UID)
 					continue
 				}
 
 				convertedInstance := convertListInstanceResponseData(instance)
+
+				// CRITICAL: Update display name IMMEDIATELY to claim this instance
+				// This must happen BEFORE releasing the mutex to prevent race conditions
+				displayName := FormatDisplayName(contaboMachine, contaboCluster)
+				log.Info("Claiming reusable instance by updating display name",
+					"instanceID", convertedInstance.InstanceId,
+					"instanceName", convertedInstance.Name,
+					"newDisplayName", displayName,
+					"forMachine", contaboMachine.Name)
+
+				_, err := r.ContaboClient.PatchInstanceWithResponse(ctx, convertedInstance.InstanceId, nil, models.PatchInstanceRequest{
+					DisplayName: &displayName,
+				})
+				if err != nil {
+					log.Error(err, "Failed to update instance display name to claim it",
+						"instanceID", convertedInstance.InstanceId)
+					continue
+				}
+
+				// Update the converted instance with the new display name
+				convertedInstance.DisplayName = displayName
 
 				// Reset the instance by removing any private network assignments
 				if err := r.resetInstance(ctx, contaboMachine, convertedInstance, nil); err != nil {
@@ -151,6 +176,12 @@ func (r *ContaboMachineReconciler) findReusableInstance(
 						"instanceID", convertedInstance.InstanceId)
 					continue
 				}
+
+				log.Info("Successfully claimed and reset reusable instance",
+					"instanceID", convertedInstance.InstanceId,
+					"instanceName", convertedInstance.Name,
+					"displayName", displayName,
+					"forMachine", contaboMachine.Name)
 
 				return convertedInstance, nil
 			}
@@ -241,9 +272,9 @@ func (r *ContaboMachineReconciler) updateInstanceState(
 
 	displayName := FormatDisplayName(contaboMachine, contaboCluster)
 
-	// Update display name if needed
+	// Update display name if needed (it may have already been set by findReusableInstance)
 	if instance.DisplayName != displayName {
-		log.Info("Updating instance display name to mark it as used",
+		log.Info("Updating instance display name",
 			"instanceID", instance.InstanceId,
 			"oldDisplayName", instance.DisplayName,
 			"newDisplayName", displayName)
@@ -253,6 +284,10 @@ func (r *ContaboMachineReconciler) updateInstanceState(
 		if err != nil {
 			return fmt.Errorf("failed to update instance display name: %w", err)
 		}
+	} else {
+		log.V(1).Info("Instance display name already correct, skipping update",
+			"instanceID", instance.InstanceId,
+			"displayName", displayName)
 	}
 
 	// Add private networking if not already added
