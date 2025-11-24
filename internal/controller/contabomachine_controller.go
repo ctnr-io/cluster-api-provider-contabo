@@ -783,7 +783,7 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 			ctx,
 			contaboMachine,
 			contaboCluster,
-			"sudo cat /var/log/cloud-init-output.log | grep '[CAPC] Error'",
+			"sudo cat /var/log/cloud-init-output.log | grep '\\[CAPC\\] Error'",
 		)
 		if cloudInitLogsError != "" {
 			message = "cloud-init error: " + strings.Split(cloudInitLogsError, "[CAPC] Error")[1]
