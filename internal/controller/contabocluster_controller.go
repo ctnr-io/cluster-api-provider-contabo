@@ -133,7 +133,7 @@ func (r *ContaboClusterReconciler) reconcileApply(ctx context.Context, contaboCl
 
 	// Check if private network was created
 	if result, err := r.reconcilePrivateNetwork(ctx, contaboCluster); err != nil || result.RequeueAfter != 0 {
-		return ctrl.Result{}, err
+		return result, err
 	}
 
 	// Check if SSH key was created

@@ -729,6 +729,7 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 				Type:   infrastructurev1beta2.InstanceBootstrapCondition,
 				Status: metav1.ConditionFalse,
 				Reason: infrastructurev1beta2.InstanceReinstallingFailedReason,
+				Message: fmt.Sprintf("Failed to reinstall instance, statusCode: %d", resp.StatusCode()),
 			})
 			return ctrl.Result{RequeueAfter: 15 * time.Second}, r.handleError(
 				ctx,
@@ -1322,6 +1323,7 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMac
 			"newDisplayName", displayName)
 	}
 
+	// If there's an error message, set failure status to prevent recreating other resources
 	if hasErrorMessage {
 		log.Info("Instance marked with error message, skipping private network unassignment, for further investigation",
 			"instanceID", instance.InstanceId)
@@ -1389,6 +1391,9 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMac
 
 	// Remove ProviderID
 	contaboMachine.Spec.ProviderID = nil
+
+	// Remove Index
+	contaboMachine.Spec.Index = nil
 
 	return err
 }

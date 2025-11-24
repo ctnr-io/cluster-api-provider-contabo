@@ -348,13 +348,16 @@ func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, c
 	case infrastructurev1beta2.InstanceStatusRescue:
 	case infrastructurev1beta2.InstanceStatusResetPassword:
 	case infrastructurev1beta2.InstanceStatusUninstalled:
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, r.handleError(
-			ctx,
-			contaboMachine,
-			errors.New("instance is not ready"),
-			infrastructurev1beta2.InstanceCreatingReason,
-			fmt.Sprintf("Instance %d is in %s state", contaboMachine.Status.Instance.InstanceId, contaboMachine.Status.Instance.Status),
-		)
+		message := fmt.Sprintf("Instance %d is in %s state, waiting...", contaboMachine.Status.Instance.InstanceId, contaboMachine.Status.Instance.Status)
+		log.Info(message)
+		meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+			Type:    infrastructurev1beta2.InstanceReadyCondition,
+			Status:  metav1.ConditionFalse,
+			Reason:  infrastructurev1beta2.InstanceCreatingReason,
+			Message: message,
+		})
+		// Always requeue to keep checking until instance is ready
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	case infrastructurev1beta2.InstanceStatusInstalling:
 		message := fmt.Sprintf("Instance %d is installing, waiting for it to be running...", contaboMachine.Status.Instance.InstanceId)
 		log.Info(message)
@@ -364,28 +367,30 @@ func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, c
 			Reason:  infrastructurev1beta2.InstanceCreatingReason,
 			Message: message,
 		})
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		// Always requeue to keep checking until instance is ready
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	case infrastructurev1beta2.InstanceStatusStopped:
 		message := fmt.Sprintf("Instance %d is stopped, starting it...", contaboMachine.Status.Instance.InstanceId)
 		log.Info(message)
 		meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
 			Type:    infrastructurev1beta2.InstanceReadyCondition,
 			Status:  metav1.ConditionFalse,
-			Reason:  infrastructurev1beta2.InstanceReadyReason,
+			Reason:  infrastructurev1beta2.InstanceCreatingReason,
 			Message: message,
 		})
 		// Start the instance if it is stopped
 		_, err := r.ContaboClient.Start(ctx, contaboMachine.Status.Instance.InstanceId, nil)
 		if err != nil {
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, r.handleError(
-				ctx,
-				contaboMachine,
-				err,
-				infrastructurev1beta2.InstanceFailedReason,
-				fmt.Sprintf("Failed to start instance %d", contaboMachine.Status.Instance.InstanceId),
-			)
+			log.Error(err, "Failed to start stopped instance", "instanceID", contaboMachine.Status.Instance.InstanceId)
+			meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
+				Type:    infrastructurev1beta2.InstanceReadyCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  infrastructurev1beta2.InstanceFailedReason,
+				Message: fmt.Sprintf("Failed to start instance: %v", err),
+			})
 		}
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		// Always requeue to verify the instance started successfully
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	case infrastructurev1beta2.InstanceStatusRunning:
 		message := fmt.Sprintf("Instance %d is running", contaboMachine.Status.Instance.InstanceId)
 		log.Info(message)
