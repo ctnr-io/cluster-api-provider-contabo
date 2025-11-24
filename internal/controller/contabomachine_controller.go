@@ -726,9 +726,9 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 		})
 		if err != nil || resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
 			meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
-				Type:   infrastructurev1beta2.InstanceBootstrapCondition,
-				Status: metav1.ConditionFalse,
-				Reason: infrastructurev1beta2.InstanceReinstallingFailedReason,
+				Type:    infrastructurev1beta2.InstanceBootstrapCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  infrastructurev1beta2.InstanceReinstallingFailedReason,
 				Message: fmt.Sprintf("Failed to reinstall instance, statusCode: %d", resp.StatusCode()),
 			})
 			return ctrl.Result{RequeueAfter: 15 * time.Second}, r.handleError(
@@ -1299,6 +1299,15 @@ func (r *ContaboMachineReconciler) handleError(ctx context.Context, contaboMachi
 func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, instance *infrastructurev1beta2.ContaboInstanceStatus, errorMessage *string) error {
 	log := logf.FromContext(ctx)
 
+	// Remove Instance from Status
+	contaboMachine.Status = infrastructurev1beta2.ContaboMachineStatus{}
+
+	// Remove ProviderID
+	contaboMachine.Spec.ProviderID = nil
+
+	// Remove Index
+	contaboMachine.Spec.Index = nil
+
 	hasErrorMessage := errorMessage != nil || (instance != nil && instance.ErrorMessage != nil)
 
 	// Set error on contabo machine status
@@ -1381,19 +1390,14 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMac
 
 	// Retrieve SSH key from ContaboCluster to keep access after reinstall
 	// Reinstall to clear any residual configuration
-	r.ContaboClient.ReinstallInstance(ctx, instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
+	_, err = r.ContaboClient.ReinstallInstance(ctx, instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
 		ImageId:     DefaultUbuntuImageID,
 		DefaultUser: ptr.To(models.ReinstallInstanceRequestDefaultUserAdmin),
 	})
-
-	// Remove Instance from Status
-	contaboMachine.Status = infrastructurev1beta2.ContaboMachineStatus{}
-
-	// Remove ProviderID
-	contaboMachine.Spec.ProviderID = nil
-
-	// Remove Index
-	contaboMachine.Spec.Index = nil
+	if err != nil {
+		log.Error(err, "Failed to reinstall instance to reset configuration",
+			"instanceID", instance.InstanceId)
+	}
 
 	return err
 }
