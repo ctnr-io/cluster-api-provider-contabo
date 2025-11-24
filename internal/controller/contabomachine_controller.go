@@ -594,16 +594,23 @@ func (r *ContaboMachineReconciler) reconcilePrivateNetworkAssignment(ctx context
 			)
 		}
 
-		log.Info("Rebooting instance to apply private network changes",
+		// Need to Reinstall to apply network changes
+		log.Info("Reinstalling instance to apply private network changes",
 			"instanceID", contaboMachine.Status.Instance.InstanceId)
-		_, err = r.ContaboClient.Restart(ctx, contaboMachine.Status.Instance.InstanceId, nil)
+		sshKeys := []int64{contaboCluster.Status.SshKey.SecretId}
+		_, err = r.ContaboClient.ReinstallInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
+			SshKeys:      &sshKeys,
+			DefaultUser:  ptr.To(models.ReinstallInstanceRequestDefaultUserAdmin),
+			ImageId:      DefaultUbuntuImageID,
+			RootPassword: nil,
+		})
 		if err != nil {
 			return ctrl.Result{RequeueAfter: 15 * time.Second}, r.handleError(
 				ctx,
 				contaboMachine,
 				err,
 				infrastructurev1beta2.InstanceFailedReason,
-				"Failed to reboot instance after private network assignment",
+				"Failed to reinstall instance after private network assignment",
 			)
 		}
 
