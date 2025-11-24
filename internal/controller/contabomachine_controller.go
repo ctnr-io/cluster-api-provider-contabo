@@ -882,68 +882,102 @@ func (r *ContaboMachineReconciler) initializeNode(ctx context.Context, machine *
 	log.Info("Node found in cluster, updating ips",
 		"nodeName", nodeName,
 		"instanceID", contaboMachine.Status.Instance.InstanceId)
+	{
+		// Build a map to deduplicate addresses by (Type, Address)
+		// Collect all addresses
+		addresses := []corev1.NodeAddress{}
+		for _, addr := range contaboMachine.Status.Addresses {
+			addresses = append(addresses, corev1.NodeAddress{
+				Type:    corev1.NodeAddressType(addr.Type),
+				Address: addr.Address,
+			})
+		}
 
-	// Build a map to deduplicate addresses by (Type, Address)
-	// Collect all addresses
-	addresses := []corev1.NodeAddress{}
-	for _, addr := range contaboMachine.Status.Addresses {
-		addresses = append(addresses, corev1.NodeAddress{
-			Type:    corev1.NodeAddressType(addr.Type),
-			Address: addr.Address,
-		})
-	}
+		// Patch node with merged addresses
+		patchNode := &corev1.Node{
+			Status: corev1.NodeStatus{
+				Addresses: addresses,
+			},
+		}
 
-	// Patch node with merged addresses
-	patchNode := &corev1.Node{
-		Status: corev1.NodeStatus{
-			Addresses: addresses,
-		},
-	}
-
-	patchBytes, err := json.Marshal(patchNode)
-	if err != nil {
-		log.Error(err, "Failed to marshal node status patch")
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-	}
-
-	log.Info("Patching node with IP addresses",
-		"nodeName", nodeName,
-		"ips", addresses)
-
-	_, err = k8sClient.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status")
-	if err != nil {
-		log.Error(err, "Failed to patch node with IPs", "nodeName", nodeName)
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-	}
-
-	log.Info("Successfully patched node with IPs", "nodeName", nodeName, "ips", addresses)
-
-	// Set node providerId and Remove unitialized taint if present
-	node, err := k8sClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Info("Node not found in cluster yet, will retry", "nodeName", nodeName)
+		patchBytes, err := json.Marshal(patchNode)
+		if err != nil {
+			log.Error(err, "Failed to marshal node status patch")
 			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 		}
-		log.Info("Node not found in cluster, kubelet seems not ready, will retry", "nodeName", nodeName)
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-	}
 
-	node.Spec.ProviderID = BuildProviderID(contaboMachine.Status.Instance.Name)
-
-	taintRemoved := false
-	for i, taint := range node.Spec.Taints {
-		if taint.Key == "node.cloudprovider.kubernetes.io/uninitialized" {
-			node.Spec.Taints = append(node.Spec.Taints[:i], node.Spec.Taints[i+1:]...)
-			taintRemoved = true
-			break
-		}
-	}
-	if taintRemoved {
-		_, err = k8sClient.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
+		// Check if ips are already set to avoid unnecessary patching
+		existingNode, err := k8sClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		if err != nil {
-			log.Error(err, "Failed to initialize node", "nodeName", nodeName)
-			return ctrl.Result{}, fmt.Errorf("failed to initialize node %s: %w", nodeName, err)
+			if apierrors.IsNotFound(err) {
+				log.Info("Node not found in cluster yet, will retry", "nodeName", nodeName)
+				return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+			}
+			log.Info("Node not found in cluster, kubelet seems not ready, will retry", "nodeName", nodeName)
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		}
+
+		ipsAlreadySet := true
+		for _, addrToSet := range addresses {
+			found := false
+			for _, existingAddr := range existingNode.Status.Addresses {
+				if existingAddr.Type == addrToSet.Type && existingAddr.Address == addrToSet.Address {
+					found = true
+					break
+				}
+			}
+			if !found {
+				ipsAlreadySet = false
+				break
+			}
+		}
+
+		if !ipsAlreadySet {
+			log.Info("Patching node with IP addresses",
+				"nodeName", nodeName,
+				"ips", addresses)
+			_, err = k8sClient.CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status")
+			if err != nil {
+				log.Error(err, "Failed to patch node with IPs", "nodeName", nodeName)
+				return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+			}
+		} else {
+			log.Info("Node IP addresses are already up to date, skipping patch",
+				"nodeName", nodeName,
+				"ips", addresses)
+		}
+
+		log.Info("Successfully patched node with IPs", "nodeName", nodeName, "ips", addresses)
+	}
+
+	// Set node providerId and Remove unitialized taint if present
+	{
+		node, err := k8sClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				log.Info("Node not found in cluster yet, will retry", "nodeName", nodeName)
+				return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+			}
+			log.Info("Node not found in cluster, kubelet seems not ready, will retry", "nodeName", nodeName)
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		}
+
+		node.Spec.ProviderID = BuildProviderID(contaboMachine.Status.Instance.Name)
+
+		taintRemoved := true
+		for i, taint := range node.Spec.Taints {
+			if taint.Key == "node.cloudprovider.kubernetes.io/uninitialized" {
+				node.Spec.Taints = append(node.Spec.Taints[:i], node.Spec.Taints[i+1:]...)
+				taintRemoved = false
+				break
+			}
+		}
+		if !taintRemoved {
+			_, err = k8sClient.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
+			if err != nil {
+				log.Error(err, "Failed to initialize node", "nodeName", nodeName)
+				return ctrl.Result{}, fmt.Errorf("failed to initialize node %s: %w", nodeName, err)
+			}
 		}
 	}
 	log.Info("Successfully initialize node", "nodeName", nodeName)
