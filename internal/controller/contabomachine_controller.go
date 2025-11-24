@@ -156,7 +156,7 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			"ready", contaboCluster.Status.Ready)
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
-	
+
 	// Ensure Private Network is available before proceeding with machine provisioning
 	if contaboCluster.Status.PrivateNetwork == nil {
 		log.Info("Waiting for ContaboCluster Private Network to be configured",
@@ -697,15 +697,8 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 		contaboCluster,
 		"sudo cat /etc/cluster-uuid",
 	)
-	if err != nil || result.RequeueAfter > 0 {
-		// If we get SSH no supported methods remain, it's likely the instance has wrong SSH keys
-		// Force a reinstall to fix this
-		if err != nil && strings.Contains(err.Error(), "no supported methods remain") {
-			log.Info("SSH no supported methods remain - instance likely has wrong SSH keys, forcing reinstall",
-				"instanceID", contaboMachine.Status.Instance.InstanceId)
-		} else {
-			return result, err
-		}
+	if (err != nil && !strings.Contains(err.Error(), "no supported methods remain")) || result.RequeueAfter > 0 {
+		return result, err
 	} else if strings.TrimSpace(output) == contaboCluster.Spec.ClusterUUID {
 		log.Info("Instance already has the correct clusterUUID, skipping reinstall",
 			"instanceID", contaboMachine.Status.Instance.InstanceId)
@@ -732,12 +725,12 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 			"instanceId", contaboMachine.Status.Instance.InstanceId,
 			"sshKeyIds", sshKeys,
 			"defaultUser", contaboMachine.Status.Instance.DefaultUser,
-			"imageId", contaboMachine.Status.Instance.ImageId)
+			"imageId", DefaultUbuntuImageID)
 
 		resp, err := r.ContaboClient.ReinstallInstanceWithResponse(ctx, contaboMachine.Status.Instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
 			SshKeys:      &sshKeys,
 			DefaultUser:  ptr.To(models.ReinstallInstanceRequestDefaultUserAdmin),
-			ImageId:      contaboMachine.Status.Instance.ImageId,
+			ImageId:      DefaultUbuntuImageID,
 			RootPassword: nil,
 			UserData:     &bootstrapData,
 		})
@@ -806,7 +799,7 @@ func (r *ContaboMachineReconciler) bootstrapInstance(ctx context.Context, machin
 		}
 		err := errors.New(message)
 		log.Error(err, message)
-		if err := r.resetInstance(ctx, contaboMachine, contaboCluster, contaboMachine.Status.Instance, &message); err != nil {
+		if err := r.resetInstance(ctx, contaboMachine, contaboMachine.Status.Instance, &message); err != nil {
 			log.Error(err, "Failed to reset instance after cloud-init failure",
 				"instanceID", contaboMachine.Status.Instance.InstanceId)
 		}
@@ -986,7 +979,7 @@ func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, contaboM
 	}
 
 	// Reset the instance by removing it from any private networks
-	if err := r.resetInstance(ctx, contaboMachine, contaboCluster, instance, nil); err != nil {
+	if err := r.resetInstance(ctx, contaboMachine, instance, nil); err != nil {
 		log.Error(err, "Failed to reset instance during deletion",
 			"instanceID", instance.InstanceId)
 	}
@@ -1236,46 +1229,12 @@ func (r *ContaboMachineReconciler) runMachineInstanceSshCommand(ctx context.Cont
 	sshClient, err = ssh.Dial("tcp", net.JoinHostPort(host, "22"), config)
 	if err != nil {
 		// Provide more specific error information for better requeue handling
-		errStr := err.Error()
-
-		// // Check for connection reset - this means SSH service is restarting or overloaded
-		// if strings.Contains(errStr, "connection reset") || strings.Contains(errStr, "Connection reset") {
-		// 	log.Info("SSH connection reset by peer - SSH service may be restarting, will retry",
-		// 		"host", host,
-		// 		"user", user)
-		// 	return "", ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
-		// }
-
-		// // This doesn't work and make connection refused
-		// // // Check for permission denied - this usually means wrong SSH keys
-		// // if strings.Contains(errStr, "no supported methods remain") {
-		// // 	log.Error(err, "SSH authentication failed - instance may have incorrect SSH keys, updating it",
-		// // 		"host", host,
-		// // 		"user", user,
-		// // 		"instanceID", contaboMachine.Status.Instance.InstanceId,
-		// // 		"clusterSSHKeyID", contaboCluster.Status.SshKey.SecretId,
-		// // 		"instanceSSHKeys", contaboMachine.Status.Instance.SshKeys)
-
-		// // 	// Update keys
-		// // 	_, err := r.ContaboClient.ResetPasswordAction(ctx, contaboMachine.Status.Instance.InstanceId, nil, models.InstancesResetPasswordActionsRequest{
-		// // 		SshKeys: &[]int64{contaboCluster.Status.SshKey.SecretId},
-		// // 	})
-		// // 	if err != nil {
-		// // 		log.Error(err, "Failed to update instance SSH keys via Contabo API",
-		// // 			"instanceID", contaboMachine.Status.Instance.InstanceId,
-		// // 			"sshKeyID", contaboCluster.Status.SshKey.SecretId)
-		// // 	}
-
-		// // 	// Return specific error to trigger reinstall
-		// // 	return "", ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-		// // }
-
 		log.Info("SSH connection failed, will retry",
 			"host", host,
 			"user", user,
-			"error", errStr,
+			"error", err.Error(),
 		)
-		return "", ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		return "", ctrl.Result{RequeueAfter: 15 * time.Second}, err
 	}
 	defer func() {
 		if closeErr := sshClient.Close(); closeErr != nil {
@@ -1324,7 +1283,7 @@ func (r *ContaboMachineReconciler) handleError(ctx context.Context, contaboMachi
 
 // getKubeconfig retrieves the kubeconfig from the owner Cluster's secret
 // resetInstance prepares an instance for reuse by removing it from any private networks
-func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster, instance *infrastructurev1beta2.ContaboInstanceStatus, errorMessage *string) error {
+func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, instance *infrastructurev1beta2.ContaboInstanceStatus, errorMessage *string) error {
 	log := logf.FromContext(ctx)
 
 	hasErrorMessage := errorMessage != nil || (instance != nil && instance.ErrorMessage != nil)
@@ -1407,21 +1366,11 @@ func (r *ContaboMachineReconciler) resetInstance(ctx context.Context, contaboMac
 	time.Sleep(1 * time.Second) // Wait a bit to ensure unassignment is processed
 
 	// Retrieve SSH key from ContaboCluster to keep access after reinstall
-	sshKeys := []int64{}
-	if contaboCluster.Status.SshKey != nil {
-		// Keep the SSH keys to allow access after reinstall
-		sshKeys = []int64{contaboCluster.Status.SshKey.SecretId}
-	}
 	// Reinstall to clear any residual configuration
-	_, err = r.ContaboClient.ReinstallInstance(ctx, instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
+	r.ContaboClient.ReinstallInstance(ctx, instance.InstanceId, &models.ReinstallInstanceParams{}, models.ReinstallInstanceRequest{
 		ImageId:     DefaultUbuntuImageID,
 		DefaultUser: ptr.To(models.ReinstallInstanceRequestDefaultUserAdmin),
-		SshKeys: &sshKeys,
 	})
-	if err != nil {
-		log.Error(err, "Failed to reinstall instance after unassigning private network",
-			"instanceID", instance.InstanceId)
-	}
 
 	// Remove Instance from Status
 	contaboMachine.Status = infrastructurev1beta2.ContaboMachineStatus{}

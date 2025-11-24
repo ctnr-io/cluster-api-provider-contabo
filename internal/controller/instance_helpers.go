@@ -146,7 +146,7 @@ func (r *ContaboMachineReconciler) findReusableInstance(
 				convertedInstance := convertListInstanceResponseData(instance)
 
 				// Reset the instance by removing any private network assignments
-				if err := r.resetInstance(ctx, contaboMachine, contaboCluster, convertedInstance, nil); err != nil {
+				if err := r.resetInstance(ctx, contaboMachine, convertedInstance, nil); err != nil {
 					log.Error(err, "Failed to reset instance",
 						"instanceID", convertedInstance.InstanceId)
 					continue
@@ -183,7 +183,7 @@ func (r *ContaboMachineReconciler) createNewInstance(
 
 		if contaboMachine.Spec.Instance.Name != nil && *contaboMachine.Spec.Instance.Name != "" {
 			msg := fmt.Sprintf("instance name must not be specified to create a new instance: %s", *contaboMachine.Spec.Instance.Name)
-			if err := r.resetInstance(ctx, contaboMachine, contaboCluster, nil, ptr.To(msg)); err != nil {
+			if err := r.resetInstance(ctx, contaboMachine, nil, ptr.To(msg)); err != nil {
 				log.Error(err, "Failed to reset instance creation attempt with invalid name",
 					"instanceName", *contaboMachine.Spec.Instance.Name)
 			}
@@ -288,7 +288,7 @@ func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, c
 			"errorMessage", *contaboMachine.Status.Instance.ErrorMessage)
 
 		// Reset instance
-		err := r.resetInstance(ctx, contaboMachine, contaboCluster, contaboMachine.Status.Instance, contaboMachine.Status.Instance.ErrorMessage)
+		err := r.resetInstance(ctx, contaboMachine, contaboMachine.Status.Instance, contaboMachine.Status.Instance.ErrorMessage)
 		if err != nil {
 			log.Error(err, "Failed to reset instance",
 				"instanceID", contaboMachine.Status.Instance.InstanceId)
@@ -326,7 +326,7 @@ func (r *ContaboMachineReconciler) validateInstanceStatus(ctx context.Context, c
 			"errorMessage", errorMessage)
 
 		// Reset instance
-		err := r.resetInstance(ctx, contaboMachine, contaboCluster, contaboMachine.Status.Instance, &errorMessage)
+		err := r.resetInstance(ctx, contaboMachine, contaboMachine.Status.Instance, &errorMessage)
 		if err != nil {
 			log.Error(err, "Failed to reset instance",
 				"instanceID", contaboMachine.Status.Instance.InstanceId)
