@@ -198,6 +198,8 @@ func (r *ContaboClusterReconciler) reconcileContaboSSHKeySecret(ctx context.Cont
 
 		sshKey = &sshKeyRetrieveResp.JSON200.Data[0]
 		log.Info("Created new SSH key in Contabo API", "sshKeyID", sshKey.SecretId, "sshKeyName", sshKey.Name)
+		// Requeue to allow time for the SSH key to be fully available in Contabo API
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	} else {
 		log.Info("SSH key already exists in Contabo API", "sshKeyContaboName", sshKeyContaboName, "sshKeyID", resp.JSON200.Data[0].SecretId)
 		sshKey = &resp.JSON200.Data[0]
