@@ -49,8 +49,14 @@ write_files:
   owner: 'root:root'
   permissions: '0644'
   content: |-
-    fs.inotify.max_user_watches=524288
-    fs.inotify.max_user_instances=512
+    fs.inotify.max_user_instances = 512
+    fs.inotify.max_user_watches = 1048576
+- path: /etc/sysctl.d/99-max-memory-mapped-files.conf
+  owner: 'root:root'
+  permissions: '0644'
+  content: |-
+    # 1MiB mappings per 1GiB of RAM
+    vm.max_map_count = 1048576
 - path: /etc/cron.d/etcd-backup
   owner: 'root:root'
   permissions: '0644'

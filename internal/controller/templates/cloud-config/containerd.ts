@@ -40,6 +40,15 @@ export const writeFiles: WriteFiles = [
       fs.inotify.max_user_instances = 512
       fs.inotify.max_user_watches = 1048576
     `,
+  },
+  {
+    // Increase memory mapped files limit, useful for Elasticsearch and other databases, even Solana
+    path: "/etc/sysctl.d/99-max-memory-mapped-files.conf",
+    owner: "root:root",
+    permissions: "0644",
+    content: tag("conf")`
+      vm.max_map_count = 1048576
+    `,
   }
 ];
 
