@@ -79,6 +79,7 @@ type ContaboMachineReconciler struct {
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines;machines/status,verbs=get;list;watch
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=create;update;delete;get;list;watch
+// (Node cordon/drain is handled by Cluster API; controller does not perform node eviction)
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ContaboMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -184,11 +185,11 @@ func (r *ContaboMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// Handle deleted machines
 	if !contaboMachine.DeletionTimestamp.IsZero() {
-		r.reconcileDelete(ctx, contaboMachine, contaboCluster)
+		result := r.reconcileDelete(ctx, contaboMachine, contaboCluster)
 		// Patch to update status and remove finalizer
 		// Note: This may fail if finalizer was already removed, which is fine
 		_ = patchHelper.Patch(ctx, contaboMachine)
-		return ctrl.Result{}, nil
+		return result, nil
 	}
 
 	// Handle non-deleted machines
@@ -235,8 +236,8 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 	}
 
 	// Setup the resource
-	if result, err := r.setupContaboMachine(ctx, machine, contaboMachine, contaboCluster); err != nil || result.RequeueAfter > 0 {
-		return result, err
+	if result := r.setupContaboMachine(ctx, machine, contaboMachine, contaboCluster); result.RequeueAfter > 0 {
+		return result, nil
 	}
 
 	contaboMachine.Status.Initialization = &infrastructurev1beta2.ContaboMachineInitializationStatus{
@@ -312,7 +313,7 @@ func (r *ContaboMachineReconciler) reconcileNormal(ctx context.Context, machine 
 }
 
 // setupContaboMachine handles initial machine setup and validation
-func (r *ContaboMachineReconciler) setupContaboMachine(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) (ctrl.Result, error) {
+func (r *ContaboMachineReconciler) setupContaboMachine(ctx context.Context, machine *clusterv1.Machine, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) ctrl.Result {
 	log := logf.FromContext(ctx)
 
 	if contaboMachine.Status.Instance == nil {
@@ -339,7 +340,7 @@ func (r *ContaboMachineReconciler) setupContaboMachine(ctx context.Context, mach
 	// Assign a unique index to this machine within the cluster
 	if err := r.assignMachineIndex(ctx, contaboMachine, machine.Spec.ClusterName); err != nil {
 		log.Error(err, "Failed to assign machine index")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Second}
 	}
 
 	// Check if cluster private network is ready
@@ -350,7 +351,7 @@ func (r *ContaboMachineReconciler) setupContaboMachine(ctx context.Context, mach
 			Status: metav1.ConditionFalse,
 			Reason: infrastructurev1beta2.InstanceWaitingForPrivateNetworksReason,
 		})
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 15 * time.Second}
 	}
 	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
 		Type:   infrastructurev1beta2.ClusterPrivateNetworkReadyCondition,
@@ -366,7 +367,7 @@ func (r *ContaboMachineReconciler) setupContaboMachine(ctx context.Context, mach
 			Status: metav1.ConditionFalse,
 			Reason: infrastructurev1beta2.InstanceWaitingForSshKeyReason,
 		})
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 15 * time.Second}
 	}
 	meta.SetStatusCondition(&contaboMachine.Status.Conditions, metav1.Condition{
 		Type:   infrastructurev1beta2.ClusterSshKeyReadyCondition,
@@ -374,7 +375,7 @@ func (r *ContaboMachineReconciler) setupContaboMachine(ctx context.Context, mach
 		Reason: infrastructurev1beta2.ClusterSshKeyReadyReason,
 	})
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{}
 }
 
 // getBootstrapData retrieves and validates bootstrap data
@@ -855,23 +856,11 @@ func (r *ContaboMachineReconciler) initializeNode(ctx context.Context, machine *
 		"instanceID", contaboMachine.Status.Instance.InstanceId,
 		"instanceIP", contaboMachine.Status.Instance.IpConfig.V4.Ip)
 
-	kubeconfig, err := r.getKubeconfig(ctx, contaboCluster)
+	k8sClient, err := r.getKubeClient(ctx, contaboCluster)
 	if err != nil {
 		log.Info("Waiting to get kubeconfig from owner Cluster",
 			"clusterName", machine.Spec.ClusterName,
 			"namespace", machine.Namespace)
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-	}
-
-	config, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
-	if err != nil {
-		log.Error(err, "Failed to create REST config from kubeconfig")
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
-	}
-
-	k8sClient, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		log.Error(err, "Failed to create Kubernetes client from REST config")
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
@@ -988,7 +977,7 @@ func (r *ContaboMachineReconciler) initializeNode(ctx context.Context, machine *
 	return ctrl.Result{}, nil
 }
 
-func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) {
+func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, contaboMachine *infrastructurev1beta2.ContaboMachine, contaboCluster *infrastructurev1beta2.ContaboCluster) ctrl.Result {
 	_ = contaboCluster // may be used in future for cluster-specific cleanup logic
 	log := logf.FromContext(ctx)
 
@@ -1008,10 +997,95 @@ func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, contaboM
 		log.Info("Instance is already nil, assuming it is deleted, removing finalizer",
 			"name", contaboMachine.Name)
 		controllerutil.RemoveFinalizer(contaboMachine, infrastructurev1beta2.MachineFinalizer)
-		return
+		return ctrl.Result{}
 	}
 
 	instance := contaboMachine.Status.Instance
+
+	// Verify Cluster API has drained the node (do not cordon or evict pods ourselves)
+	var providerID string
+	if contaboMachine.Spec.ProviderID != nil {
+		providerID = *contaboMachine.Spec.ProviderID
+	} else if instance != nil && instance.Name != "" {
+		providerID = BuildProviderID(instance.Name)
+	}
+
+	if providerID != "" {
+		// Get Kubernetes client for the target cluster and verify that CAPI has drained the node
+		k8sClient, err := r.getKubeClient(ctx, contaboCluster)
+		if err != nil {
+			log.Info("Waiting to get kubeconfig from owner Cluster to verify node drain",
+				"cluster", contaboCluster.Name)
+			return ctrl.Result{RequeueAfter: 15 * time.Second}
+		}
+
+		nodeName, err := ParseProviderID(providerID)
+		if err != nil {
+			log.Error(err, "Failed to parse node name from provider ID during deletion",
+				"providerID", providerID)
+			return ctrl.Result{RequeueAfter: 15 * time.Second}
+		}
+
+		// Wait for node to be cordoned and drained by Cluster API before proceeding.
+		// We do NOT cordon or evict pods here; we only verify the node is cordoned
+		// (Spec.Unschedulable) and that there are no remaining non-daemonset pods.
+		// Mirror pods (static pods managed by the kubelet) are annotated with
+		// "kubernetes.io/config.mirror" and should be ignored when checking for
+		// remaining workload.
+		node, err := k8sClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				// Node already removed from cluster - safe to continue cleanup
+				log.Info("Node not found in cluster, proceeding with instance cleanup", "nodeName", nodeName)
+			} else {
+				log.Error(err, "Failed to get node during deletion", "nodeName", nodeName)
+				return ctrl.Result{RequeueAfter: 15 * time.Second}
+			}
+		} else {
+			if !node.Spec.Unschedulable {
+				log.Info("Waiting for Cluster API to cordon node before cleaning up instance", "nodeName", nodeName)
+				return ctrl.Result{RequeueAfter: 15 * time.Second}
+			}
+
+			// Node is cordoned; ensure there are no remaining non-daemonset pods
+			pods, err := k8sClient.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: fmt.Sprintf("spec.nodeName=%s", nodeName)})
+			if err != nil {
+				log.Error(err, "Failed to list pods on node during deletion", "nodeName", nodeName)
+				return ctrl.Result{RequeueAfter: 15 * time.Second}
+			}
+
+			remaining := 0
+			for _, pod := range pods.Items {
+				// Ignore mirror pods (static pods created by kubelet)
+				if _, ok := pod.Annotations["kubernetes.io/config.mirror"]; ok {
+					continue
+				}
+				// Ignore DaemonSet pods
+				skip := false
+				for _, owner := range pod.OwnerReferences {
+					if owner.Kind == "DaemonSet" {
+						skip = true
+						break
+					}
+				}
+				if skip {
+					continue
+				}
+				// Ignore pods already terminating
+				if pod.DeletionTimestamp != nil {
+					continue
+				}
+				remaining++
+			}
+
+			if remaining > 0 {
+				log.Info("Waiting for Cluster API to drain node before cleaning up instance", "nodeName", nodeName, "remainingPods", remaining)
+				return ctrl.Result{RequeueAfter: 15 * time.Second}
+			}
+
+			log.Info("Node is cordoned and drained, proceeding with instance cleanup", "nodeName", nodeName)
+		}
+	}
 
 	// First, stop the instance
 	_, err := r.ContaboClient.Stop(ctx, instance.InstanceId, nil)
@@ -1029,6 +1103,8 @@ func (r *ContaboMachineReconciler) reconcileDelete(ctx context.Context, contaboM
 	// Remove finalizer
 	controllerutil.RemoveFinalizer(contaboMachine, infrastructurev1beta2.MachineFinalizer)
 	log.Info("Removed finalizer from ContaboMachine")
+
+	return ctrl.Result{}
 }
 
 // Convert OAPI Instance models to CAPC Instance models
@@ -1465,4 +1541,20 @@ func (r *ContaboMachineReconciler) getKubeconfig(ctx context.Context, contaboClu
 	}
 
 	return string(kubeconfigData), nil
+}
+
+// getKubeClient returns a Kubernetes clientset for the workload cluster represented
+// by the provided ContaboCluster. It loads the kubeconfig from a secret and
+// builds a clientset. Callers should handle requeueing when this method returns
+// an error (for example while the kubeconfig secret is not yet present).
+func (r *ContaboMachineReconciler) getKubeClient(ctx context.Context, contaboCluster *infrastructurev1beta2.ContaboCluster) (*kubernetes.Clientset, error) {
+	kubeconfig, err := r.getKubeconfig(ctx, contaboCluster)
+	if err != nil {
+		return nil, err
+	}
+	config, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
+	if err != nil {
+		return nil, err
+	}
+	return kubernetes.NewForConfig(config)
 }
