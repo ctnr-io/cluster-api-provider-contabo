@@ -54,9 +54,7 @@ write_files:
 - path: /etc/sysctl.d/99-max-memory-mapped-files.conf
   owner: 'root:root'
   permissions: '0644'
-  content: |-
-    # 1MiB mappings per 1GiB of RAM
-    vm.max_map_count = 1048576
+  content: vm.max_map_count = 1048576
 
 packages:
   - sudo
