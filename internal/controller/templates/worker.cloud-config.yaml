@@ -54,15 +54,16 @@ write_files:
 - path: /etc/sysctl.d/99-max-memory-mapped-files.conf
   owner: 'root:root'
   permissions: '0644'
-  content: |-
-    # 1MiB mappings per 1GiB of RAM
-    vm.max_map_count = 1048576
+  content: vm.max_map_count = 1048576
 
 packages:
   - sudo
   - ca-certificates
   - curl
   - gnupg
+  - nfs-common
+  - open-iscsi
+  - util-linux
   - etcd-client
   - apt-transport-https
   - gpg
@@ -142,6 +143,28 @@ runcmd:
   - |
     # Update sysctl settings
     sudo sysctl --system
+  
+  - |
+    # Configure node for Longhorn storage
+    apt-get update || true
+    
+    # Install Longhorn prerequisites if not already installed
+    apt-get install -y nfs-common open-iscsi util-linux || true
+    
+    # Load required kernel modules
+    modprobe dm_crypt || true
+    modprobe iscsi_tcp || true
+    
+    # Enable and start iscsid
+    systemctl enable iscsid || true
+    systemctl start iscsid || true
+    
+    # Disable multipathd (not needed for VPS, can interfere with Longhorn)
+    systemctl stop multipathd || true
+    systemctl disable multipathd || true
+    systemctl mask multipathd || true
+    
+    echo 'Longhorn prerequisites configured'
   
   - |
     export DEBIAN_FRONTEND=noninteractive
